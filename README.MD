@@ -12,7 +12,7 @@ The original game is a side-scrolling platformer for DOS featuring 6 worlds, two
 
 - [Free Pascal Compiler 3.2.2+](https://www.freepascal.org/) (i386/Win32)
 - [SDL2 development library](https://github.com/libsdl-org/SDL/releases) (`SDL2.dll`)
-- [SDL2-for-Pascal](https://github.com/PascalGameDevelopment/SDL2-for-Pascal) bindings (included in `../SDL2-for-Pascal/`)
+- [SDL2-for-Pascal](https://github.com/PascalGameDevelopment/SDL2-for-Pascal) bindings (included in `SDL2-for-Pascal/`)
 
 ### Compile
 
@@ -25,7 +25,7 @@ build.bat
 Or compile manually:
 
 ```bat
-fpc -Mtp -Sg -Fu..\SDL2-for-Pascal\units MARIO.PAS
+fpc -Mtp -Sg -FuSDL2-for-Pascal MARIO.PAS
 ```
 
 Place `SDL2.dll` in the same directory as `MARIO.exe` and run.
@@ -118,8 +118,11 @@ sdl2_port/
   JOYSTICK.PAS       SDL2 joystick support
   CPU286.PAS         Stub (originally 286 detection)
   build.bat          Build script
+  icon.ico           Application icon
+  mario.rc           Windows resource script
   sprites/           170 auto-generated sprite include files
   data/              Level data, fonts, palettes, backgrounds
+  SDL2-for-Pascal/   SDL2 Pascal bindings (MPL/zlib licensed)
 tools/
   convert_sprites.py     Convert .000 sprite files to Pascal constants
   extract_worlds.py      Extract level data from original WORLDS.PAS
