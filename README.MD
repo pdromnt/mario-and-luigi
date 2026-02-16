@@ -80,6 +80,17 @@ The original game used extensive x86 inline assembly and direct hardware access.
 - VGA vertical blanking (CRTC SetYStart/SetYEnd) &rarr; Window sized to exact content area
 - Executable name checksum protection &rarr; Removed
 
+## Running
+
+All game assets (sprites, levels, fonts, palettes) are compiled directly into the executable as typed constants. To run the game standalone you only need two files:
+
+| File        | Description                          |
+|-------------|--------------------------------------|
+| `MARIO.exe` | Game executable (all data embedded)  |
+| `SDL2.dll`  | SDL2 runtime library                 |
+
+Place both files in the same folder and run `MARIO.exe`.
+
 ## Project Structure
 
 ```
@@ -117,8 +128,8 @@ tools/
 
 ## Credits
 
-- * The original game and its source code were created by Mike Wiering in 1994. All credit for the original code goes to its author. You can find the original source at [wieringsoftware.nl](https://wieringsoftware.nl/mario/).
+- The original game and its source code were created by Mike Wiering in 1994. All credit for the original code goes to its author. You can find the original source at [wieringsoftware.nl](https://wieringsoftware.nl/mario/).
 - **SDL2 Port**: Created with assistance from Claude (Anthropic)
 - **SDL2-for-Pascal**: PascalGameDevelopment community
-- * The characters "Mario", "Luigi", and all related names, images, and concepts are the registered trademarks and copyright of **Nintendo Co., Ltd.** This project is **not affiliated with, authorized, or endorsed by Nintendo** in any way.
-- * This project is strictly non-commercial. It is provided for free, and no profit is being made from its existence or distribution. Do not attempt to sell or commercialize this software.
+- The characters "Mario", "Luigi", and all related names, images, and concepts are the registered trademarks and copyright of **Nintendo Co., Ltd.** This project is **not affiliated with, authorized, or endorsed by Nintendo** in any way.
+- This project is strictly non-commercial. It is provided for free, and no profit is being made from its existence or distribution. Do not attempt to sell or commercialize this software.
