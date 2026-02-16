@@ -19,7 +19,7 @@ if not exist "%FPC%" (
 )
 
 set FPC_OPTS=-Mtp -Ci- -Cr- -Sg -Si -O2
-set UNIT_PATH=-Fu..\SDL2-for-Pascal\units -Fu.
+set UNIT_PATH=-FuSDL2-for-Pascal -Fu.
 set OUTPUT=-FE.
 
 REM Compile icon resource (mario.res is also committed to the repo
