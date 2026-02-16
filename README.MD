@@ -11,7 +11,7 @@ The original game is a side-scrolling platformer for DOS featuring 6 worlds, two
 ### Requirements
 
 - [Free Pascal Compiler 3.2.2+](https://www.freepascal.org/) (i386/Win32)
-- [SDL2 development library](https://github.com/libsdl-org/SDL/releases) (`SDL2.dll`)
+- [SDL2 development library](https://github.com/libsdl-org/SDL/releases) (`SDL2.dll`, included)
 - [SDL2-for-Pascal](https://github.com/PascalGameDevelopment/SDL2-for-Pascal) bindings (included in `SDL2-for-Pascal/`)
 
 ### Compile
