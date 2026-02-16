@@ -1,2 +1,25 @@
-OUT/*.*
-TP7/
+# Free Pascal compiled units and object files
+*.o
+*.or
+*.ppu
+*.rst
+*.compiled
+
+# Compiled Windows resources
+*.res
+
+# Executables
+*.exe
+
+# SDL2 runtime (users must supply their own)
+SDL2.dll
+
+# Editor backup files
+*.bak
+*.~*
+*~
+
+# OS junk
+Thumbs.db
+Desktop.ini
+.DS_Store
