@@ -123,12 +123,6 @@ sdl2_port/
   sprites/           170 auto-generated sprite include files
   data/              Level data, fonts, palettes, backgrounds
   SDL2-for-Pascal/   SDL2 Pascal bindings (MPL/zlib licensed)
-tools/
-  convert_sprites.py     Convert .000 sprite files to Pascal constants
-  extract_worlds.py      Extract level data from original WORLDS.PAS
-  extract_demokeys.py    Extract demo keystrokes from DEMOKEYS.OBJ
-  extract_font.py        Extract Swiss font bitmap data
-  extract_asm_data.py    General assembly data extractor
 ```
 
 ## Credits
