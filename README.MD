@@ -93,6 +93,30 @@ All game assets (sprites, levels, fonts, palettes) are compiled directly into th
 
 Place both files in the same folder and run `MARIO.exe`.
 
+## Controls
+
+### Menu
+| Key             | Action              |
+|-----------------|----------------------|
+| Up / Down       | Navigate menu        |
+| Enter           | Select               |
+| Escape          | Back / Quit          |
+
+### Gameplay
+| Key             | Action              |
+|-----------------|----------------------|
+| Left / Right    | Move                 |
+| Alt             | Jump                 |
+| Ctrl / Space    | Run / Fire (fire mode) |
+| Down            | Duck / Enter pipe    |
+| Up              | Look up / Enter pipe |
+| P               | Pause                |
+| S               | Toggle status bar    |
+| Q               | Toggle sound on/off  |
+| Escape          | Quit                 |
+
+Joystick is also supported.
+
 ## Project Structure
 
 ```
