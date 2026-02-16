@@ -1,5 +1,7 @@
 # Mario & Luigi - SDL2 Port
 
+![Mario & Luigi - Latest Build Screenshot](https://cdn.planetmagpie.net/mario.png)
+
 A faithful port of **Mario & Luigi** (1994) by Mike Wiering from DOS (Turbo Pascal + VGA Mode 13h) to modern Windows using **SDL2** and **Free Pascal**.
 
 The original game is a side-scrolling platformer for DOS featuring 6 worlds, two-player mode (Mario & Luigi), enemies, power-ups, pipes, and PC speaker sound effects. This port preserves all gameplay, visuals, and audio identically while replacing all DOS/hardware-specific code with SDL2 equivalents.
