@@ -13,9 +13,6 @@
 # Executables
 *.exe
 
-# SDL2 runtime (users must supply their own)
-SDL2.dll
-
 # Editor backup files
 *.bak
 *.~*
