@@ -5,8 +5,10 @@
 *.rst
 *.compiled
 
-# Compiled Windows resources
+# Compiled Windows resources (but NOT mario.res — it's tracked so
+# the build works without windres installed)
 *.res
+!mario.res
 
 # Executables
 *.exe

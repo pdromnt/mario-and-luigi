@@ -22,11 +22,15 @@ set FPC_OPTS=-Mtp -Ci- -Cr- -Sg -Si -O2
 set UNIT_PATH=-Fu..\SDL2-for-Pascal\units -Fu.
 set OUTPUT=-FE.
 
-REM Compile icon resource
-if exist icon.ico (
-    if not exist mario.res (
-        echo Compiling icon resource...
-        "%WINDRES%" --preprocessor=cat -i mario.rc -o mario.res 2>nul
+REM Compile icon resource (mario.res is also committed to the repo
+REM as a fallback in case windres is not available)
+if exist icon.ico if exist mario.rc (
+    echo Compiling icon resource...
+    "%WINDRES%" --preprocessor=cat -i mario.rc -o mario.res 2>nul
+    if exist mario.res (
+        echo Icon resource OK.
+    ) else (
+        echo WARNING: windres not found, using pre-built mario.res if available.
     )
 )
 
