@@ -1,18 +1,13 @@
 @echo off
 REM Build Mario & Luigi SDL2 port with Free Pascal
-REM -Mtp: Turbo Pascal mode (Integer = 16-bit)
-REM -Ci-: No IO checking
-REM -Cr-: No range checking
-REM -Sg: Allow goto statements
-REM -Si: Allow inline
-REM -O2: Optimization level 2
+REM Output goes into OUT\ folder — ready to distribute or run.
 
 set FPC_DIR=C:\FPC\3.2.2\bin\i386-Win32
 set FPC=%FPC_DIR%\ppc386.exe
 if not exist "%FPC%" (
-    set FPC=fpc
+    set FPC=ppc386
     set WINDRES=windres
-    echo Using fpc from PATH...
+    echo Using ppc386 from PATH...
 ) else (
     set WINDRES=%FPC_DIR%\windres.exe
     echo Using %FPC%
@@ -20,7 +15,11 @@ if not exist "%FPC%" (
 
 set FPC_OPTS=-Mtp -Ci- -Cr- -Sg -Si -O2
 set UNIT_PATH=-FuSDL2-for-Pascal -Fu.
-set OUTPUT=-FE.
+
+REM Prepare output directory
+if not exist OUT mkdir OUT
+
+set OUTPUT=-FEOUT
 
 REM Compile icon resource (mario.res is also committed to the repo
 REM as a fallback in case windres is not available)
@@ -37,7 +36,7 @@ if exist icon.ico if exist mario.rc (
 echo.
 echo Compiling Mario SDL2 port...
 echo.
-"%FPC%" %FPC_OPTS% %UNIT_PATH% %OUTPUT% mario.pas
+"%FPC%" %FPC_OPTS% %UNIT_PATH% %OUTPUT% MARIO.PAS
 if errorlevel 1 (
     echo.
     echo Compilation FAILED!
@@ -48,15 +47,14 @@ echo.
 echo Compilation successful!
 echo.
 
-REM Copy SDL2.dll if not present
-if not exist SDL2.dll (
-    if exist ..\SDL2.dll (
-        copy ..\SDL2.dll . >nul 2>&1
-        echo Copied SDL2.dll
-    ) else (
-        echo WARNING: SDL2.dll not found! Game will not run without it.
-    )
-)
+REM Copy SDL2 DLLs into OUT
+if exist SDL2.dll copy /Y SDL2.dll OUT\ >nul 2>&1
+if exist SDL2_mixer.dll copy /Y SDL2_mixer.dll OUT\ >nul 2>&1
 
-echo Run mario.exe to play!
+REM Copy music folder into OUT
+if not exist OUT\music mkdir OUT\music
+if exist music\*.ogg copy /Y music\*.ogg OUT\music\ >nul 2>&1
+
+echo Build complete! Output is in the OUT\ folder.
+echo Run OUT\MARIO.exe to play!
 pause
