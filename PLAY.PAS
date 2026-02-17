@@ -642,6 +642,9 @@ implementation
     begin
       InitPlayer(MacroHdr.PosX, MacroHdr.PosY, Player);
       XView := MacroHdr.ViewX;
+      { Restore player powerup mode if saved in header }
+      if MacroHdr.Mode in [mdSmall, mdLarge, mdFire] then
+        Data.Mode[Player] := MacroHdr.Mode;
     end;
 
     FillChar (LastXView, SizeOf (LastXView), 0);
@@ -715,6 +718,12 @@ implementation
         DrawPlayer;
       ShowPage;
     end;
+
+    { Sync LastXView so the first game-loop frame sees zero delta.
+      Without this, replays starting deep in the level get corrupt
+      sky/parallax because MoveScreen computes a huge scroll delta. }
+    for i := 0 to MAX_PAGE do
+      LastXView[i] := XView;
 
     Demo := dmNoDemo;
     Waiting := FALSE;
@@ -790,6 +799,7 @@ implementation
             RecHdr.Seed := RandSeed;
             GetPlayerPos(RecHdr.PosX, RecHdr.PosY);
             RecHdr.ViewX := XView;
+            RecHdr.Mode := Data.Mode[Player];
             RecordMacro;
             DemoRecording := TRUE;
           end
@@ -1016,8 +1026,11 @@ implementation
 
       PlayMusic;
 
-      if InPipe and PlayingMacro then
-        GameDone := TRUE;
+      { Let pipe transitions happen during replay playback so that
+        user-recorded replays survive cross-world pipes. The key
+        sequence was recorded through the pipe, so playback should
+        follow the same path. The old guard aborted ALL replays on
+        ANY pipe, which caused replays to end prematurely. }
 
       { Auto-end demo playback when sequence runs out }
       if WasPlayingMacro and (not PlayingMacro) then

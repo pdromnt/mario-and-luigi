@@ -54,6 +54,8 @@ interface
       PosX: Integer;    { Player X pixel position at record start }
       PosY: Integer;    { Player Y pixel position at record start }
       ViewX: Integer;   { XView scroll position at record start }
+      Mode: Byte;       { Player powerup mode (mdSmall/mdLarge/mdFire) }
+      Pad1: Byte;       { Padding for alignment }
     end;
 
   var
@@ -341,6 +343,17 @@ implementation
     F: File;
     i: Integer;
   begin
+    { Ensure all keys end in "released" state so playback doesn't
+      end with a phantom key press (e.g. jump). If a key's current
+      run is odd (= pressed), advance to the next even position and
+      add a short released run. }
+    for i := 1 to MaxKeys do
+      if (SeqPos[i] < MAX_SEQ_LEN - 1) and (SeqPos[i] mod 2 = 1) then
+      begin
+        Inc(SeqPos[i]);
+        Sequence[i, SeqPos[i]] := 2;  { 2 frames of key released }
+      end;
+
     Assign(F, FileName);
     ReWrite(F, 1);
     if IOResult = 0 then
