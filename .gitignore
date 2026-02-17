@@ -13,10 +13,11 @@
 # Executables
 *.exe
 
-# Game saves, config files and replays
+# Game saves, config files, replays and hiscores
 *.cfg
 *.sav
 *.rpl
+*.his
 
 # Editor backup files
 *.bak
