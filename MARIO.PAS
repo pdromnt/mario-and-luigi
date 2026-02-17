@@ -843,7 +843,9 @@ program Mario;
                    ST_KEYS,
                    ST_SOUND,
                    ST_GAMEPAD,
+                   ST_DEMOS_MENU,
                    ST_DEMOS,
+                   ST_DEMOS_DEL,
                    ST_HISCORES);
       Menu: array[1..7] of string[40];
       KeyVal: array[1..6] of string[14];   { Key name for ST_KEYS items }
@@ -858,6 +860,7 @@ program Mario;
       DemoLevels: array[1..9] of Word;
       NumDemos: Integer;
       ShowHiScoreFromMenu: Boolean;
+      DelF: File;
 
     procedure Up;
     begin
@@ -1079,7 +1082,20 @@ program Mario;
                  NumOptions := 7;
                  LastStatus := ST_OPTIONS;
               end;
-            ST_DEMOS:
+            ST_DEMOS_MENU:
+              begin
+                 Menu[1] := 'PLAY';
+                 Menu[2] := 'DELETE';
+                 Menu[3] := 'BACK';
+                 Menu[4] := '';
+                 Menu[5] := '';
+                 Menu[6] := '';
+                 Menu[7] := '';
+                 NumOptions := 3;
+                 LastStatus := ST_MENU;
+              end;
+            ST_DEMOS,
+            ST_DEMOS_DEL:
               begin
                  ScanDemos;
                  for i := 1 to NumDemos do
@@ -1088,7 +1104,7 @@ program Mario;
                  for i := NumDemos + 2 to 7 do
                    Menu[i] := '';
                  NumOptions := NumDemos + 1;
-                 LastStatus := ST_MENU;
+                 LastStatus := ST_DEMOS_MENU;
               end;
             ST_START:
               begin
@@ -1292,7 +1308,7 @@ program Mario;
                 ST_MENU:
                   case Selected of
                     1: Status := ST_START;
-                    2: Status := ST_DEMOS;
+                    2: Status := ST_DEMOS_MENU;
                     3: ShowHiScoreFromMenu := TRUE;
                     4: Status := ST_OPTIONS;
                     5: begin
@@ -1346,11 +1362,31 @@ program Mario;
                     Joystick.LastJSButton := -1;
                   end;
 
+                ST_DEMOS_MENU:
+                  case Selected of
+                    1: Status := ST_DEMOS;
+                    2: Status := ST_DEMOS_DEL;
+                    3: Status := LastStatus;
+                  end;
+
                 ST_DEMOS:
                   if Selected = NumDemos + 1 then
                     Status := LastStatus
                   else
                     PlayUserDemo := TRUE;
+
+                ST_DEMOS_DEL:
+                  if Selected = NumDemos + 1 then
+                    Status := LastStatus
+                  else if (Selected >= 1) and (Selected <= NumDemos) then
+                  begin
+                    { Delete the selected replay file }
+                    Assign(DelF, DemoFiles[Selected]);
+                    Erase(DelF);
+                    i := IOResult;  { Consume IOResult }
+                    { Refresh: re-enter ST_DEMOS_DEL to rescan }
+                    OldStatus := ST_NONE;
+                  end;
 
                 ST_SOUND:
                   case Selected of
