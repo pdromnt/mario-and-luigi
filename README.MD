@@ -117,6 +117,10 @@ Place both files in the same folder and run `MARIO.exe`.
 
 Joystick is also supported.
 
+## Levels
+
+The game features 6 worlds with a second harder "Turbo" loop after completion (12 progression stages total). See **[LEVELS.md](LEVELS.md)** for a complete level map, visual themes, pipe system details, and progression breakdown.
+
 ## Project Structure
 
 ```
