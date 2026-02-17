@@ -99,9 +99,9 @@ implementation
     for idx := 0 to NumSamples - 1 do
     begin
       if SamplePhase < Period / 2.0 then
-        Sample := SQUARE_WAVE_AMPLITUDE
+        Sample := SFXAmplitude
       else
-        Sample := -SQUARE_WAVE_AMPLITUDE;
+        Sample := -SFXAmplitude;
 
       Samples[idx] := Sample;
 

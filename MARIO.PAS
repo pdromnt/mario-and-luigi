@@ -24,6 +24,7 @@ program Mario;
     Palettes,
     Txt,
     Music,
+    BGMusic,
     sdl2;
 
   const
@@ -46,6 +47,10 @@ program Mario;
       KeyPause:  LongInt;   { default: SDLK_p     }
       KeySound:  LongInt;   { default: SDLK_q     }
       KeyStatus: LongInt;   { default: SDLK_s     }
+      { Sound settings (v2) }
+      BGMOn: Boolean;        { Background music enabled }
+      BGMVol: Integer;       { 0-10 }
+      SFXVol: Integer;       { 0-10 }
     end;
 
     SaveData = record
@@ -212,6 +217,13 @@ program Mario;
     { KeyStatus added later — old configs may have valid Jump..Sound but no Status }
     if Settings.KeyStatus = 0 then
       Settings.KeyStatus := LongInt(SDLK_s);
+    { Sound settings added later — old configs have BGMVol=0 }
+    if Settings.BGMVol = 0 then
+    begin
+      Settings.BGMOn := TRUE;
+      Settings.BGMVol := 10;
+      Settings.SFXVol := 10;
+    end;
 
     if not SavesOK then
     begin
@@ -225,6 +237,10 @@ program Mario;
     begin
       Play.Stat := SLine;
       Buffers.BeeperSound := Sound;
+      Buffers.BGMEnabled := BGMOn;
+      Buffers.BGMVolume := BGMVol;
+      Buffers.SFXVolume := SFXVol;
+      Buffers.ApplySFXVolume;
     end;
 
     ApplyKeyBindings;
@@ -239,6 +255,9 @@ program Mario;
     begin
       SLine := Play.Stat;
       Sound := Buffers.BeeperSound;
+      BGMOn := Buffers.BGMEnabled;
+      BGMVol := Buffers.BGMVolume;
+      SFXVol := Buffers.SFXVolume;
     end;
     { Copy current key bindings from Keyboard unit to Settings for saving }
     Settings.KeyJump  := LongInt(Keyboard.BindJump);
@@ -346,9 +365,11 @@ program Mario;
                    ST_ERASE,
                    ST_OPTIONS,
                    ST_NUMPLAYERS,
-                   ST_KEYS);
+                   ST_KEYS,
+                   ST_SOUND);
       Menu: array[1..7] of string[40];
       KeyVal: array[1..6] of string[14];   { Key name for ST_KEYS items }
+      VolStr: string[2];                   { For displaying volume values }
       BG: array[0..MAX_PAGE, 1..7] of Word;
       NumOptions: Integer;
       WaitingForKey: Integer;
@@ -430,6 +451,7 @@ program Mario;
       FillChar (BG, SizeOf (BG), 0);
       FillChar (Menu, SizeOf (Menu), 0);
       SetFont (0, Bold + Shadow);
+      PlayMenuMusic;
 
       if Status <> ST_OPTIONS then
       begin
@@ -462,10 +484,7 @@ program Mario;
                end;
             ST_OPTIONS:
               begin
-                 if BeeperSound then
-                   Menu[1] := 'SOUND ON '
-                 else
-                   Menu[1] := 'SOUND OFF';
+                 Menu[1] := 'SOUND >';
                  if Play.Stat then
                    Menu[2] := 'STATUSLINE ON '
                  else
@@ -494,6 +513,26 @@ program Mario;
                  KeyVal[5] := GetKeyNameStr(Settings.KeySound);
                  KeyVal[6] := GetKeyNameStr(Settings.KeyStatus);
                  NumOptions := 7;
+                 LastStatus := ST_OPTIONS;
+              end;
+            ST_SOUND:
+              begin
+                 if Buffers.BGMEnabled then
+                   Menu[1] := 'BGM ON '
+                 else
+                   Menu[1] := 'BGM OFF';
+                 if BeeperSound then
+                   Menu[2] := 'SFX ON '
+                 else
+                   Menu[2] := 'SFX OFF';
+                 Str(Buffers.BGMVolume, VolStr);
+                 Menu[3] := 'BGM VOLUME '#7' ' + VolStr;
+                 Str(Buffers.SFXVolume, VolStr);
+                 Menu[4] := 'SFX VOLUME '#7' ' + VolStr;
+                 Menu[5] := 'BACK';
+                 Menu[6] := '';
+                 Menu[7] := '';
+                 NumOptions := 5;
                  LastStatus := ST_OPTIONS;
               end;
             ST_START:
@@ -636,6 +675,38 @@ program Mario;
               Up;
             kbDownArrow:
               Down;
+            kbLeftArrow:
+              if Status = ST_SOUND then
+              begin
+                case Selected of
+                  3: if Buffers.BGMVolume > 0 then
+                     begin
+                       Dec(Buffers.BGMVolume);
+                       ApplyBGMVolume;
+                     end;
+                  4: if Buffers.SFXVolume > 0 then
+                     begin
+                       Dec(Buffers.SFXVolume);
+                       ApplySFXVolume;
+                     end;
+                end;
+              end;
+            kbRightArrow:
+              if Status = ST_SOUND then
+              begin
+                case Selected of
+                  3: if Buffers.BGMVolume < 10 then
+                     begin
+                       Inc(Buffers.BGMVolume);
+                       ApplyBGMVolume;
+                     end;
+                  4: if Buffers.SFXVolume < 10 then
+                     begin
+                       Inc(Buffers.SFXVolume);
+                       ApplySFXVolume;
+                     end;
+                end;
+              end;
             kbSP,
             kbEnter:
               case Status of
@@ -660,10 +731,7 @@ program Mario;
 
                 ST_OPTIONS:
                   case Selected of
-                    1: if BeeperSound then
-                         BeeperOff
-                       else
-                         BeeperOn;
+                    1: Status := ST_SOUND;
                     2: Play.Stat := not Play.Stat;
                     3: begin
                          Status := ST_KEYS;
@@ -681,6 +749,29 @@ program Mario;
                     WaitingForKey := Selected;
                     KeyVal[WaitingForKey] := '...';
                     Keyboard.LastKeyCode := SDLK_UNKNOWN;
+                  end;
+
+                ST_SOUND:
+                  case Selected of
+                    1: begin  { BGM ON/OFF }
+                         Buffers.BGMEnabled := not Buffers.BGMEnabled;
+                         if Buffers.BGMEnabled then
+                         begin
+                           ResetCurrentTrack;
+                           PlayMenuMusic;
+                         end
+                         else
+                           StopBGMusic;
+                       end;
+                    2: begin  { SFX ON/OFF }
+                         if BeeperSound then
+                           BeeperOff
+                         else
+                           BeeperOn;
+                       end;
+                    3: begin end;  { BGM VOLUME: use Left/Right }
+                    4: begin end;  { SFX VOLUME: use Left/Right }
+                    5: Status := LastStatus;
                   end;
 
                 ST_NUMPLAYERS:
@@ -830,6 +921,7 @@ begin  { Mario }
     InitVGA;
 
   InitAudio;  { Open SDL audio device for PC speaker emulation }
+  InitBGMusic;  { Open SDL2_mixer for background music }
 
 {$IFDEF MENU}
   repeat
@@ -920,5 +1012,6 @@ begin  { Mario }
 {$IFDEF MENU}
   until QuitGame;
 {$ENDIF}
+  ShutdownBGMusic;
   WriteConfig;
 end.

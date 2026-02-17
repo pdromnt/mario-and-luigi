@@ -17,6 +17,7 @@ interface
     Status,
     Txt,
     Music,
+    BGMusic,
     KeyBoard,
     sdl2;
 
@@ -125,6 +126,7 @@ implementation
       ShowObjects: Boolean;
       OnlyDraw: Boolean;
       ScoreTick: Byte;
+      InSubWorld: Boolean;
 
 
     procedure WriteTotalScore;
@@ -379,6 +381,7 @@ implementation
     FillChar (TotalBackGrAddr, SizeOf (TotalBackGrAddr), #0);
     ShowScore := FALSE;
     ScoreTick := 0;
+    InSubWorld := FALSE;
 
     if not Turbo then
     begin
@@ -419,6 +422,15 @@ implementation
     end;
 
     BuildWorld;
+
+    { Start background music for this level }
+    if N2 in ['1'..'6'] then
+    begin
+      if InSubWorld then
+        PlaySubLevelMusic
+      else
+        PlayLevelMusic(Ord(N2) - Ord('0'));
+    end;
 
   Restart:
     ResetStack;
@@ -499,12 +511,18 @@ implementation
         end;
         if Key = #16 then  { Q - quiet/sound }
         begin
-          if BeeperSound then
-            BeeperOff
+          if BeeperSound or Buffers.BGMEnabled then
+          begin
+            BeeperOff;
+            Buffers.BGMEnabled := FALSE;
+            PauseBGMusic;
+          end
           else
           begin
             BeeperOn;
             Beep (80);
+            Buffers.BGMEnabled := TRUE;
+            ResumeBGMusic;
           end;
           Key := #255;
         end;
@@ -565,6 +583,7 @@ implementation
           begin
             Waiting := TRUE;
             TextCounter := 0;
+            StopBGMusic;
           end;
           Inc (TextCounter);
           if (not ShowScore) and (TextCounter in [50..50 + MAX_PAGE]) then
@@ -586,6 +605,7 @@ implementation
             Inc (Data.Score[Player], LevelScore);
             Waiting := TRUE;
             GameDone := FALSE;
+            StopBGMusic;
           end;
 
       if Key = #25 then  { P - pause }
@@ -610,6 +630,8 @@ implementation
         begin
           if TextCounter in [100..100 + MAX_PAGE] then
           begin
+            if TextCounter = 100 then
+              PlayGameOverMusic;
             SetFont (0, Bold + Shadow);
             CenterText (20, PlayerName [Player], $1E);
             SetFont (1, Bold + Shadow);
@@ -634,7 +656,10 @@ implementation
       MoveBlocks;
 
       if (Key in [kbEsc, #129]) then
+      begin
         QuitGame := True;  { Esc }
+        StopBGMusic;
+      end;
 
       MoveScreen;
       RunRemove;
@@ -708,10 +733,12 @@ implementation
           #$E1: begin
                  Swap;
                  FindPipeExit;
+                 InSubWorld := not InSubWorld;
                end;
           #$E7: begin
                  GameDone := True;
                  PlayWorld := True;
+                 StopBGMusic;
                end;
 
         end;
