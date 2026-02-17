@@ -4,8 +4,12 @@
 
 A faithful port of **Mario & Luigi** (1994) by Mike Wiering from DOS (Turbo Pascal + VGA Mode 13h) to modern Windows using **SDL2** and **Free Pascal**.
 
-The original game is a side-scrolling platformer for DOS featuring 6 worlds, two-player mode (Mario & Luigi), enemies, power-ups, pipes, and PC speaker sound effects. This port preserves all gameplay, visuals, and audio identically while replacing all DOS/hardware-specific code with SDL2 equivalents. This port was made based on the original [MARIOSRC.ZIP](https://wieringsoftware.nl/mario/MARIOSRC.ZIP) release, not based on the GitHub repo that was featured on Hacker News recently.
-
+The original game is a side-scrolling platformer for DOS featuring 6 worlds, two-player mode (Mario & Luigi), enemies, power-ups, pipes, and PC speaker sound effects. This port preserves all gameplay, visuals, and audio identically while replacing all DOS/hardware-specific code with SDL2 equivalents.  
+  
+This port was made based on the original [MARIOSRC.ZIP](https://wieringsoftware.nl/mario/MARIOSRC.ZIP) release, not based on the GitHub repo that was featured on Hacker News recently.  
+  
+You can play the original on the [Internet Archive's DOSBOX for browsers](https://archive.org/details/msdos_Mario_and_Luigi_2001).  
+  
 ## Building
 
 ### Requirements
