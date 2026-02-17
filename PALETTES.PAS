@@ -182,9 +182,9 @@ implementation
             TempPal [i, j] := Palette [i, j] - k
           else
             TempPal [i, j] := 0;
-      WaitDisplay;
-      WaitRetrace;
       ReadPalette (TempPal);
+      PresentFrame;
+      WaitRetrace;
     end;
   end;
 
@@ -203,9 +203,9 @@ implementation
             TempPal [i, j] := Palette [i, j] - k
           else
             TempPal [i, j] := 0;
-      WaitDisplay;
-      WaitRetrace;
       ReadPalette (TempPal);
+      PresentFrame;
+      WaitRetrace;
     end;
   end;
 
