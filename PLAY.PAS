@@ -636,17 +636,6 @@ implementation
       if (Key in [kbEsc, #129]) then
         QuitGame := True;  { Esc }
 
-      { DEBUG: Delete key skips to next level }
-      if Key = #83 then  { Delete key }
-      begin
-        Passed := TRUE;
-        Waiting := TRUE;
-        TextCounter := 200;
-        PipeCode [1] := #$E7;
-        InPipe := TRUE;
-        Key := #255;
-      end;
-
       MoveScreen;
       RunRemove;
 
