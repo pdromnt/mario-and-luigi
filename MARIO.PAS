@@ -1008,9 +1008,9 @@ program Mario;
               begin
                  Menu[1] := 'SOUND >';
                  if Play.Stat then
-                   Menu[2] := 'STATUSLINE ON '
+                   Menu[2] := 'STATUS BAR ON '
                  else
-                   Menu[2] := 'STATUSLINE OFF';
+                   Menu[2] := 'STATUS BAR OFF';
                  Menu[3] := 'KEYBOARD';
                  Menu[4] := 'GAMEPAD';
                  Menu[5] := 'BACK';
