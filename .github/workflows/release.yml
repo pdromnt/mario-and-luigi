@@ -1,0 +1,328 @@
+name: Build & Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+
+  # ─────────────────────────────────────────────
+  #  Windows x86 (32-bit)
+  # ─────────────────────────────────────────────
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Free Pascal (i386)
+        shell: bash
+        run: |
+          curl -L -o fpc-installer.exe \
+            "https://sourceforge.net/projects/freepascal/files/Win32/3.2.2/fpc-3.2.2.i386-win32.exe/download"
+          # Run installer silently; it installs to C:\FPC\3.2.2
+          ./fpc-installer.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR="C:\\FPC\\3.2.2"
+          echo "C:\\FPC\\3.2.2\\bin\\i386-Win32" >> "$GITHUB_PATH"
+
+      - name: Compile icon resource
+        shell: cmd
+        run: |
+          if exist icon.ico if exist mario.rc (
+            "C:\FPC\3.2.2\bin\i386-Win32\windres.exe" --preprocessor=cat -i mario.rc -o mario.res
+          )
+
+      - name: Compile
+        shell: cmd
+        run: |
+          ppc386 -Mtp -Ci- -Cr- -Sg -Si -O2 -FuSDL2-for-Pascal -Fu. -FE. MARIO.PAS
+
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p staging/music
+          cp MARIO.exe staging/
+          cp SDL2.dll SDL2_mixer.dll staging/
+          cp music/*.ogg staging/music/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-x86
+          path: staging/
+
+  # ─────────────────────────────────────────────
+  #  macOS ARM64 (.app bundle)
+  # ─────────────────────────────────────────────
+  build-macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          brew install fpc sdl2 sdl2_mixer
+
+      - name: Compile
+        run: |
+          fpc -Mtp -Ci- -Cr- -Sg -Si -O2 -FuSDL2-for-Pascal -Fu. -omario MARIO.PAS
+
+      - name: Create .app bundle
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+
+          APP="Mario.app"
+          mkdir -p "$APP/Contents/MacOS"
+          mkdir -p "$APP/Contents/Resources/music"
+          mkdir -p "$APP/Contents/Frameworks"
+
+          # Copy binary
+          cp mario "$APP/Contents/MacOS/mario"
+
+          # Copy music into Resources
+          cp music/*.ogg "$APP/Contents/Resources/music/"
+
+          # Symlink music into MacOS/ so GetMusicPath (relative to binary) finds it
+          ln -s ../Resources/music "$APP/Contents/MacOS/music"
+
+          # Create Info.plist
+          cat > "$APP/Contents/Info.plist" << PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+            "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleExecutable</key>
+            <string>mario</string>
+            <key>CFBundleName</key>
+            <string>Mario and Luigi</string>
+            <key>CFBundleIdentifier</key>
+            <string>com.mariosrc.mario-and-luigi</string>
+            <key>CFBundleVersion</key>
+            <string>${VERSION}</string>
+            <key>CFBundleShortVersionString</key>
+            <string>${VERSION}</string>
+            <key>CFBundleIconFile</key>
+            <string>mario</string>
+            <key>CFBundlePackageType</key>
+            <string>APPL</string>
+            <key>NSHighResolutionCapable</key>
+            <true/>
+          </dict>
+          </plist>
+          PLIST
+
+          # Convert icon.ico to .icns (best effort)
+          if [ -f icon.ico ]; then
+            ICONDIR=$(mktemp -d)
+            sips -s format png icon.ico --out "$ICONDIR/icon_512x512.png" 2>/dev/null || true
+            if [ -f "$ICONDIR/icon_512x512.png" ]; then
+              mkdir -p "$ICONDIR/mario.iconset"
+              # Generate required sizes
+              for SIZE in 16 32 64 128 256 512; do
+                sips -z $SIZE $SIZE "$ICONDIR/icon_512x512.png" \
+                  --out "$ICONDIR/mario.iconset/icon_${SIZE}x${SIZE}.png" 2>/dev/null || true
+              done
+              iconutil -c icns "$ICONDIR/mario.iconset" -o "$APP/Contents/Resources/mario.icns" 2>/dev/null || true
+            fi
+            rm -rf "$ICONDIR"
+          fi
+
+          # Bundle SDL2 dylibs from Homebrew
+          BREW_LIB="$(brew --prefix)/lib"
+          for lib in libSDL2 libSDL2_mixer; do
+            # Find the actual dylib (not symlink)
+            DYLIB=$(find "$BREW_LIB" -name "${lib}-*.dylib" -not -type l | head -1)
+            if [ -z "$DYLIB" ]; then
+              DYLIB=$(find "$BREW_LIB" -name "${lib}.dylib" | head -1)
+            fi
+            if [ -n "$DYLIB" ]; then
+              cp "$DYLIB" "$APP/Contents/Frameworks/"
+            fi
+          done
+
+          # Also copy transitive dependencies of SDL2_mixer (ogg, vorbis, etc.)
+          for fw in "$APP/Contents/Frameworks/"*.dylib; do
+            otool -L "$fw" 2>/dev/null | grep "$(brew --prefix)" | awk '{print $1}' | while read dep; do
+              BASENAME=$(basename "$dep")
+              if [ ! -f "$APP/Contents/Frameworks/$BASENAME" ]; then
+                cp "$dep" "$APP/Contents/Frameworks/" 2>/dev/null || true
+              fi
+            done
+          done
+
+          # Repeat once more for deeper transitive deps
+          for fw in "$APP/Contents/Frameworks/"*.dylib; do
+            otool -L "$fw" 2>/dev/null | grep "$(brew --prefix)" | awk '{print $1}' | while read dep; do
+              BASENAME=$(basename "$dep")
+              if [ ! -f "$APP/Contents/Frameworks/$BASENAME" ]; then
+                cp "$dep" "$APP/Contents/Frameworks/" 2>/dev/null || true
+              fi
+            done
+          done
+
+          # Rebase dylib paths to @executable_path/../Frameworks/
+          BINARY="$APP/Contents/MacOS/mario"
+
+          # Fix the binary's references
+          for fw in "$APP/Contents/Frameworks/"*.dylib; do
+            BASENAME=$(basename "$fw")
+            # Find what the binary currently references
+            OLDPATH=$(otool -L "$BINARY" 2>/dev/null | grep "$BASENAME" | awk '{print $1}' | head -1)
+            if [ -n "$OLDPATH" ]; then
+              install_name_tool -change "$OLDPATH" "@executable_path/../Frameworks/$BASENAME" "$BINARY"
+            fi
+          done
+
+          # Fix inter-framework references
+          for fw in "$APP/Contents/Frameworks/"*.dylib; do
+            BASENAME=$(basename "$fw")
+            # Update the dylib's own ID
+            install_name_tool -id "@executable_path/../Frameworks/$BASENAME" "$fw" 2>/dev/null || true
+            # Fix references to other bundled dylibs
+            for other in "$APP/Contents/Frameworks/"*.dylib; do
+              OTHER_BASE=$(basename "$other")
+              OLDPATH=$(otool -L "$fw" 2>/dev/null | grep "$OTHER_BASE" | grep -v "@executable_path" | awk '{print $1}' | head -1)
+              if [ -n "$OLDPATH" ]; then
+                install_name_tool -change "$OLDPATH" "@executable_path/../Frameworks/$OTHER_BASE" "$fw" 2>/dev/null || true
+              fi
+            done
+          done
+
+          # Ad-hoc code sign (required for Apple Silicon)
+          codesign --force --deep --sign - "$APP" 2>/dev/null || true
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-arm64
+          path: Mario.app/
+
+  # ─────────────────────────────────────────────
+  #  Linux x86_64
+  # ─────────────────────────────────────────────
+  build-linux-x86_64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fpc libsdl2-dev libsdl2-mixer-dev
+
+      - name: Compile
+        run: |
+          fpc -Mtp -Ci- -Cr- -Sg -Si -O2 -FuSDL2-for-Pascal -Fu. -omario MARIO.PAS
+
+      - name: Package
+        run: |
+          mkdir -p staging/music
+          cp mario staging/
+          cp music/*.ogg staging/music/
+          cat > staging/README.txt << 'EOF'
+          Mario & Luigi — SDL2 Port (Linux x86_64)
+          ==========================================
+
+          Requirements:
+            sudo apt install libsdl2-2.0-0 libsdl2-mixer-2.0-0
+
+          Run:
+            chmod +x mario
+            ./mario
+          EOF
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-x86_64
+          path: staging/
+
+  # ─────────────────────────────────────────────
+  #  Linux ARM64 (via QEMU)
+  # ─────────────────────────────────────────────
+  build-linux-arm64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build on aarch64
+        uses: uraimo/run-on-arch-action@v2
+        with:
+          arch: aarch64
+          distro: ubuntu22.04
+          githubToken: ${{ github.token }}
+          install: |
+            apt-get update
+            apt-get install -y fpc libsdl2-dev libsdl2-mixer-dev
+          run: |
+            fpc -Mtp -Ci- -Cr- -Sg -Si -O2 -FuSDL2-for-Pascal -Fu. -omario MARIO.PAS
+
+      - name: Package
+        run: |
+          mkdir -p staging/music
+          cp mario staging/
+          cp music/*.ogg staging/music/
+          cat > staging/README.txt << 'EOF'
+          Mario & Luigi — SDL2 Port (Linux ARM64)
+          ==========================================
+
+          Requirements:
+            sudo apt install libsdl2-2.0-0 libsdl2-mixer-2.0-0
+
+          Run:
+            chmod +x mario
+            ./mario
+          EOF
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-arm64
+          path: staging/
+
+  # ─────────────────────────────────────────────
+  #  Create GitHub Release
+  # ─────────────────────────────────────────────
+  release:
+    needs: [build-windows, build-macos, build-linux-x86_64, build-linux-arm64]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Create release archives
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+
+          # Windows zip
+          cd artifacts/windows-x86
+          zip -r "../../mario-luigi-${TAG}-windows-x86.zip" .
+          cd ../..
+
+          # macOS zip (preserve symlinks)
+          cd artifacts/macos-arm64
+          zip -r -y "../../mario-luigi-${TAG}-macos-arm64.zip" .
+          cd ../..
+
+          # Linux x86_64 tar.gz
+          cd artifacts/linux-x86_64
+          tar czf "../../mario-luigi-${TAG}-linux-x86_64.tar.gz" .
+          cd ../..
+
+          # Linux ARM64 tar.gz
+          cd artifacts/linux-arm64
+          tar czf "../../mario-luigi-${TAG}-linux-arm64.tar.gz" .
+          cd ../..
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            mario-luigi-*.zip
+            mario-luigi-*.tar.gz
