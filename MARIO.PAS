@@ -30,7 +30,7 @@ program Mario;
     NUM_LEV = 6;
     LAST_LEV = 2 * NUM_LEV - 1;
     MAX_SAVE = 3;
-    WAIT_BEFORE_DEMO = 500;
+    WAIT_BEFORE_DEMO = 714;
 
   type
     {$A2}  { Word alignment (TP compatible) — needed for file compatibility }
@@ -348,6 +348,7 @@ program Mario;
                    ST_NUMPLAYERS,
                    ST_KEYS);
       Menu: array[1..7] of string[40];
+      KeyVal: array[1..6] of string[14];   { Key name for ST_KEYS items }
       BG: array[0..MAX_PAGE, 1..7] of Word;
       NumOptions: Integer;
       WaitingForKey: Integer;
@@ -479,13 +480,19 @@ program Mario;
               end;
             ST_KEYS:
               begin
-                 Menu[1] := 'JUMP   '#7' ' + GetKeyNameStr(Settings.KeyJump);
-                 Menu[2] := 'RUN    '#7' ' + GetKeyNameStr(Settings.KeyRun);
-                 Menu[3] := 'FIRE   '#7' ' + GetKeyNameStr(Settings.KeyFire);
-                 Menu[4] := 'PAUSE  '#7' ' + GetKeyNameStr(Settings.KeyPause);
-                 Menu[5] := 'SOUND  '#7' ' + GetKeyNameStr(Settings.KeySound);
-                 Menu[6] := 'STATUS '#7' ' + GetKeyNameStr(Settings.KeyStatus);
+                 Menu[1] := 'JUMP';
+                 Menu[2] := 'RUN';
+                 Menu[3] := 'FIRE';
+                 Menu[4] := 'PAUSE';
+                 Menu[5] := 'SOUND';
+                 Menu[6] := 'STATUS';
                  Menu[7] := 'BACK';
+                 KeyVal[1] := GetKeyNameStr(Settings.KeyJump);
+                 KeyVal[2] := GetKeyNameStr(Settings.KeyRun);
+                 KeyVal[3] := GetKeyNameStr(Settings.KeyFire);
+                 KeyVal[4] := GetKeyNameStr(Settings.KeyPause);
+                 KeyVal[5] := GetKeyNameStr(Settings.KeySound);
+                 KeyVal[6] := GetKeyNameStr(Settings.KeyStatus);
                  NumOptions := 7;
                  LastStatus := ST_OPTIONS;
               end;
@@ -557,13 +564,22 @@ program Mario;
           end;
           wd := 0;
           xp := 0;
-          for i := 1 to 7 do
+          if Status = ST_KEYS then
           begin
-            j := TextWidth (Menu[i]);
-            if j > wd then
-              wd := j;
-            ht := 8;
+            { Fixed layout for controls: label + dot + keyname }
+            { Widest full line ~152px + 20px arrow area = 172px }
+            wd := 152;
+          end
+          else
+          begin
+            for i := 1 to 7 do
+            begin
+              j := TextWidth (Menu[i]);
+              if j > wd then
+                wd := j;
+            end;
           end;
+          ht := 8;
           { Center the visual block (arrow + gap + text) on screen:
             arrow at xp-12, text at xp+8, total = 20 + wd pixels }
           xp := (SCREEN_WIDTH - 20 - wd) div 2 + 12;
@@ -663,14 +679,7 @@ program Mario;
                   begin
                     { Start waiting for key assignment }
                     WaitingForKey := Selected;
-                    case WaitingForKey of
-                      1: Menu[1] := 'JUMP   '#7' ...';
-                      2: Menu[2] := 'RUN    '#7' ...';
-                      3: Menu[3] := 'FIRE   '#7' ...';
-                      4: Menu[4] := 'PAUSE  '#7' ...';
-                      5: Menu[5] := 'SOUND  '#7' ...';
-                      6: Menu[6] := 'STATUS '#7' ...';
-                    end;
+                    KeyVal[WaitingForKey] := '...';
                     Keyboard.LastKeyCode := SDLK_UNKNOWN;
                   end;
 
@@ -737,7 +746,7 @@ program Mario;
           begin
             i := xp;
             j := 56 + 14 * k;
-            BG[Page, k] := PushBackGr (50, j, 220, ht);
+            BG[Page, k] := PushBackGr (40, j, 250, ht + 2);
             if k = Selected then
               WriteText (i - 12, j, #16, 5);
             l := 15;
@@ -745,6 +754,9 @@ program Mario;
               l := 14 + (Counter and 1);
             SetPalette (14, 63, 61, 31);
             WriteText (i + 8, j, Menu[k], l);
+            { ST_KEYS items 1-6: draw dot + key name at fixed column }
+            if (Status = ST_KEYS) and (k <= 6) then
+              WriteText (i + 64, j, #7' ' + KeyVal[k], l);
           end;
         end;
 
@@ -752,7 +764,9 @@ program Mario;
         BlinkPalette;
         ResetStack;
 
-        Inc (Counter);
+        { Only count toward demo timeout on the main menu }
+        if Status = ST_MENU then
+          Inc (Counter);
       until IntroDone or (Counter = WAIT_BEFORE_DEMO);
       FadeDown (64);
 
