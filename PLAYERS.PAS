@@ -926,9 +926,9 @@ implementation
     keyRight := kbRight or jsRight;
     keyUp := kbUp or jsUp;
     keyDown := kbDown or jsDown;
-    keyAlt := kbAlt or jsButton1;
-    keyCtrl := kbCtrl or jsButton2;
-    keySpace := kbSpace or jsButton2;
+    keyAlt := kbAlt or jsJump;
+    keyCtrl := kbCtrl or jsRun;
+    keySpace := kbSpace or jsFire;
 
     if keyRight and (not LastKeyRight) and (Direction = dirLeft) then
     begin

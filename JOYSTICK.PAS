@@ -18,6 +18,25 @@ interface
     jsUp,
     jsDown: Boolean;
 
+    { Configurable button indices (-1 = unbound) }
+    BindJSJump:   Integer;
+    BindJSRun:    Integer;
+    BindJSFire:   Integer;
+    BindJSPause:  Integer;
+    BindJSSound:  Integer;
+    BindJSStatus: Integer;
+
+    { Per-action output booleans (set by ReadJoystick) }
+    jsJump,
+    jsRun,
+    jsFire,
+    jsPause,
+    jsSound,
+    jsStatus: Boolean;
+
+    { Last button index pressed this frame, for remapping UI (-1 = none) }
+    LastJSButton: Integer;
+
   type
     JoyRec =
       record
@@ -41,6 +60,7 @@ interface
   procedure ReadJoystick;
   procedure ResetJoystick;
   procedure Calibrate;
+  function GetJSButtonName(Idx: Integer): string;
 
 implementation
 
@@ -53,12 +73,36 @@ implementation
   var
     SDLJoystick: PSDL_Joystick;
 
+  function ReadBtn(Idx: Integer): Boolean;
+  begin
+    if (Idx >= 0) and (SDLJoystick <> nil) then
+      ReadBtn := SDL_JoystickGetButton(SDLJoystick, Idx) <> 0
+    else
+      ReadBtn := FALSE;
+  end;
+
+  function GetJSButtonName(Idx: Integer): string;
+  var
+    S: string[4];
+  begin
+    if Idx < 0 then
+      GetJSButtonName := 'NONE'
+    else
+    begin
+      Str(Idx, S);
+      GetJSButtonName := 'BTN ' + S;
+    end;
+  end;
+
   procedure ReadJoystick;
   var
     AxisX, AxisY: SmallInt;
+    HatState: Byte;
+    NumBtns, BtnIdx: Integer;
   begin
     jr.X := 0;
     jr.Y := 0;
+    LastJSButton := -1;
 
     if not jsEnabled then
     begin
@@ -68,6 +112,12 @@ implementation
       jsDown := FALSE;
       jsButton1 := FALSE;
       jsButton2 := FALSE;
+      jsJump := FALSE;
+      jsRun := FALSE;
+      jsFire := FALSE;
+      jsPause := FALSE;
+      jsSound := FALSE;
+      jsStatus := FALSE;
       Exit;
     end;
 
@@ -80,6 +130,12 @@ implementation
       jsDown := FALSE;
       jsButton1 := FALSE;
       jsButton2 := FALSE;
+      jsJump := FALSE;
+      jsRun := FALSE;
+      jsFire := FALSE;
+      jsPause := FALSE;
+      jsSound := FALSE;
+      jsStatus := FALSE;
       Exit;
     end;
 
@@ -91,16 +147,38 @@ implementation
     jr.X := Word((LongInt(AxisX) + 32768) div 256);  { 0..255 range }
     jr.Y := Word((LongInt(AxisY) + 32768) div 256);
 
-    { Read buttons }
+    { Read hat (d-pad) }
+    if SDL_JoystickNumHats(SDLJoystick) > 0 then
+      HatState := SDL_JoystickGetHat(SDLJoystick, 0)
+    else
+      HatState := 0;
+
+    { Read legacy buttons (kept for CalibrateJoystick compat) }
     jsButton1 := SDL_JoystickGetButton(SDLJoystick, 0) <> 0;
     jsButton2 := SDL_JoystickGetButton(SDLJoystick, 1) <> 0;
 
+    { Read configurable action buttons }
+    jsJump   := ReadBtn(BindJSJump);
+    jsRun    := ReadBtn(BindJSRun);
+    jsFire   := ReadBtn(BindJSFire);
+    jsPause  := ReadBtn(BindJSPause);
+    jsSound  := ReadBtn(BindJSSound);
+    jsStatus := ReadBtn(BindJSStatus);
+
+    { Scan all buttons for last-pressed capture (remapping UI) }
+    NumBtns := SDL_JoystickNumButtons(SDLJoystick);
+    if NumBtns > 32 then NumBtns := 32;
+    for BtnIdx := 0 to NumBtns - 1 do
+      if SDL_JoystickGetButton(SDLJoystick, BtnIdx) <> 0 then
+        LastJSButton := BtnIdx;
+
     if not jsWaitButton then
     begin
-      jsLeft := AxisX < -DEAD_ZONE;
-      jsRight := AxisX > DEAD_ZONE;
-      jsUp := AxisY < -DEAD_ZONE;
-      jsDown := AxisY > DEAD_ZONE;
+      { Combine axis and hat for directional input }
+      jsLeft  := (AxisX < -DEAD_ZONE) or (HatState and SDL_HAT_LEFT <> 0);
+      jsRight := (AxisX > DEAD_ZONE)  or (HatState and SDL_HAT_RIGHT <> 0);
+      jsUp    := (AxisY < -DEAD_ZONE) or (HatState and SDL_HAT_UP <> 0);
+      jsDown  := (AxisY > DEAD_ZONE)  or (HatState and SDL_HAT_DOWN <> 0);
     end
     else
     begin
@@ -111,6 +189,12 @@ implementation
       jsButtonPressed := jsButtonPressed or jsButton1 or jsButton2;
       jsButton1 := FALSE;
       jsButton2 := FALSE;
+      jsJump := FALSE;
+      jsRun := FALSE;
+      jsFire := FALSE;
+      jsPause := FALSE;
+      jsSound := FALSE;
+      jsStatus := FALSE;
     end;
   end;
 
@@ -157,6 +241,22 @@ begin
   jsWaitButton := FALSE;
   jsDetected := FALSE;
   jsEnabled := FALSE;
+  LastJSButton := -1;
+
+  { Default button bindings }
+  BindJSJump   := 0;
+  BindJSRun    := 1;
+  BindJSFire   := 1;
+  BindJSPause  := 6;
+  BindJSSound  := -1;
+  BindJSStatus := -1;
+
+  jsJump   := FALSE;
+  jsRun    := FALSE;
+  jsFire   := FALSE;
+  jsPause  := FALSE;
+  jsSound  := FALSE;
+  jsStatus := FALSE;
 
   { Try to open joystick if available }
   if SDL_NumJoysticks > 0 then

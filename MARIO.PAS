@@ -51,6 +51,13 @@ program Mario;
       BGMOn: Boolean;        { Background music enabled }
       BGMVol: Integer;       { 0-10 }
       SFXVol: Integer;       { 0-10 }
+      { Gamepad button bindings (v3) — button indices, -1 = unbound }
+      JSBtnJump:   Integer;  { default: 0 }
+      JSBtnRun:    Integer;  { default: 1 }
+      JSBtnFire:   Integer;  { default: 1 }
+      JSBtnPause:  Integer;  { default: 6 (Start) }
+      JSBtnSound:  Integer;  { default: -1 (unbound) }
+      JSBtnStatus: Integer;  { default: -1 (unbound) }
     end;
 
     SaveData = record
@@ -118,6 +125,27 @@ program Mario;
     Keyboard.BindStatus := Settings.KeyStatus;
   end;
 
+  procedure ApplyDefaultJSBindings;
+  begin
+    Settings.JSBtnJump   := 0;
+    Settings.JSBtnRun    := 1;
+    Settings.JSBtnFire   := 1;
+    Settings.JSBtnPause  := 6;
+    Settings.JSBtnSound  := -1;
+    Settings.JSBtnStatus := -1;
+  end;
+
+  procedure ApplyJSBindings;
+  { Copy gamepad bindings from Settings record to Joystick unit variables }
+  begin
+    Joystick.BindJSJump   := Settings.JSBtnJump;
+    Joystick.BindJSRun    := Settings.JSBtnRun;
+    Joystick.BindJSFire   := Settings.JSBtnFire;
+    Joystick.BindJSPause  := Settings.JSBtnPause;
+    Joystick.BindJSSound  := Settings.JSBtnSound;
+    Joystick.BindJSStatus := Settings.JSBtnStatus;
+  end;
+
   procedure DebugLog(const Msg: string);
   var
     F: Text;
@@ -142,6 +170,11 @@ program Mario;
     S: string;
     i: Integer;
   begin
+    if kc = 0 then
+    begin
+      GetKeyNameStr := '???';
+      Exit;
+    end;
     P := SDL_GetKeyName(kc);
     if P = nil then
     begin
@@ -199,9 +232,10 @@ program Mario;
   procedure ReadConfig;
     var
       i: Integer;
-      FC: SettingsFile;
+      UF: File;
       FS: SaveFile;
       SettingsOK, SavesOK: Boolean;
+      FileBytes, ReadBytes: LongInt;
   begin
     SettingsOK := FALSE;
     SavesOK := FALSE;
@@ -213,22 +247,21 @@ program Mario;
     { Consume any stale IOResult }
     i := IOResult;
 
-    { Read settings (MARIO.CFG) }
-    Assign (FC, GetConfigName);
-    Reset (FC);
+    { Read settings (MARIO.CFG) using untyped file for backward compat }
+    Assign (UF, GetConfigName);
+    Reset (UF, 1);
     if IOResult = 0 then
     begin
-      Read (FC, Settings);
-      if IOResult = 0 then
+      FileBytes := FileSize(UF);
+      if FileBytes > SizeOf(Settings) then
+        FileBytes := SizeOf(Settings);
+      if FileBytes > 0 then
       begin
-        Close (FC);
-        SettingsOK := IOResult = 0;
-      end
-      else
-      begin
-        Close (FC);
-        i := IOResult;
+        BlockRead(UF, Settings, FileBytes, ReadBytes);
+        SettingsOK := (IOResult = 0) and (ReadBytes = FileBytes);
       end;
+      Close (UF);
+      i := IOResult;
     end;
 
     { Consume any stale IOResult before next file }
@@ -277,6 +310,13 @@ program Mario;
       Settings.BGMVol := 5;
       Settings.SFXVol := 10;
     end;
+    { Gamepad bindings added later — old configs have all zeros.
+      Real configs always have JSBtnPause=6 and JSBtnSound=-1, so
+      all-zeros means old format needing defaults. }
+    if (Settings.JSBtnJump = 0) and (Settings.JSBtnRun = 0)
+      and (Settings.JSBtnFire = 0) and (Settings.JSBtnPause = 0)
+      and (Settings.JSBtnSound = 0) and (Settings.JSBtnStatus = 0) then
+      ApplyDefaultJSBindings;
 
     if not SavesOK then
     begin
@@ -297,6 +337,7 @@ program Mario;
     end;
 
     ApplyKeyBindings;
+    ApplyJSBindings;
   end;
 
   procedure WriteConfig;
@@ -320,6 +361,13 @@ program Mario;
     Settings.KeyPause  := LongInt(Keyboard.BindPause);
     Settings.KeySound  := LongInt(Keyboard.BindSound);
     Settings.KeyStatus := LongInt(Keyboard.BindStatus);
+    { Copy current gamepad bindings from Joystick unit to Settings }
+    Settings.JSBtnJump   := Joystick.BindJSJump;
+    Settings.JSBtnRun    := Joystick.BindJSRun;
+    Settings.JSBtnFire   := Joystick.BindJSFire;
+    Settings.JSBtnPause  := Joystick.BindJSPause;
+    Settings.JSBtnSound  := Joystick.BindJSSound;
+    Settings.JSBtnStatus := Joystick.BindJSStatus;
   {$IFDEF MENU}
     { Consume any stale IOResult before file operations }
     Dummy := IOResult;
@@ -428,13 +476,16 @@ program Mario;
                    ST_OPTIONS,
                    ST_NUMPLAYERS,
                    ST_KEYS,
-                   ST_SOUND);
+                   ST_SOUND,
+                   ST_GAMEPAD);
       Menu: array[1..7] of string[40];
       KeyVal: array[1..6] of string[14];   { Key name for ST_KEYS items }
+      JSVal:  array[1..6] of string[14];   { Button name for ST_GAMEPAD items }
       VolStr: string[2];                   { For displaying volume values }
       BG: array[0..MAX_PAGE, 1..7] of Word;
       NumOptions: Integer;
       WaitingForKey: Integer;
+      WaitingForJSButton: Integer;
       Page: Byte;
 
     procedure Up;
@@ -460,6 +511,9 @@ program Mario;
     GameNumber := -1;
     NextNumPlayers := Data.NumPlayers;
     WaitingForKey := 0;
+    WaitingForJSButton := 0;
+    FillChar(KeyVal, SizeOf(KeyVal), 0);
+    FillChar(JSVal, SizeOf(JSVal), 0);
 
     repeat
       if TestVGAMode then
@@ -551,12 +605,12 @@ program Mario;
                    Menu[2] := 'STATUSLINE ON '
                  else
                    Menu[2] := 'STATUSLINE OFF';
-                 Menu[3] := 'CONTROLS';
-                 Menu[4] := 'BACK';
-                 Menu[5] := '';
+                 Menu[3] := 'KEYBOARD';
+                 Menu[4] := 'GAMEPAD';
+                 Menu[5] := 'BACK';
                  Menu[6] := '';
                  Menu[7] := '';
-                 NumOptions := 4;
+                 NumOptions := 5;
                  LastStatus := ST_MENU;
               end;
             ST_KEYS:
@@ -599,6 +653,27 @@ program Mario;
                  Menu[6] := '';
                  Menu[7] := '';
                  NumOptions := 5;
+                 LastStatus := ST_OPTIONS;
+              end;
+            ST_GAMEPAD:
+              begin
+                 Menu[1] := 'JUMP';
+                 Menu[2] := 'RUN';
+                 Menu[3] := 'FIRE';
+                 Menu[4] := 'PAUSE';
+                 Menu[5] := 'SOUND';
+                 Menu[6] := 'STATUS';
+                 Menu[7] := 'BACK';
+                 if WaitingForJSButton = 0 then
+                 begin
+                   JSVal[1] := GetJSButtonName(Settings.JSBtnJump);
+                   JSVal[2] := GetJSButtonName(Settings.JSBtnRun);
+                   JSVal[3] := GetJSButtonName(Settings.JSBtnFire);
+                   JSVal[4] := GetJSButtonName(Settings.JSBtnPause);
+                   JSVal[5] := GetJSButtonName(Settings.JSBtnSound);
+                   JSVal[6] := GetJSButtonName(Settings.JSBtnStatus);
+                 end;
+                 NumOptions := 7;
                  LastStatus := ST_OPTIONS;
               end;
             ST_START:
@@ -669,9 +744,9 @@ program Mario;
           end;
           wd := 0;
           xp := 0;
-          if Status = ST_KEYS then
+          if (Status = ST_KEYS) or (Status = ST_GAMEPAD) then
           begin
-            { Fixed layout for controls: label + dot + keyname }
+            { Fixed layout for controls: label + dot + keyname/btnname }
             { Widest full line ~152px + 20px arrow area = 172px }
             wd := 152;
           end
@@ -721,6 +796,29 @@ program Mario;
             else if Keyboard.LastKeyCode = SDLK_ESCAPE then
               WaitingForKey := 0;  { Cancel assignment }
           end;
+          Key := #0;
+          Keyboard.LastKeyCode := SDLK_UNKNOWN;
+          Update := TRUE;
+        end
+        else if (Status = ST_GAMEPAD) and (WaitingForJSButton > 0) then
+        begin
+          { Gamepad button assignment mode: capture next button press }
+          ReadJoystick;
+          if Joystick.LastJSButton >= 0 then
+          begin
+            case WaitingForJSButton of
+              1: Settings.JSBtnJump   := Joystick.LastJSButton;
+              2: Settings.JSBtnRun    := Joystick.LastJSButton;
+              3: Settings.JSBtnFire   := Joystick.LastJSButton;
+              4: Settings.JSBtnPause  := Joystick.LastJSButton;
+              5: Settings.JSBtnSound  := Joystick.LastJSButton;
+              6: Settings.JSBtnStatus := Joystick.LastJSButton;
+            end;
+            ApplyJSBindings;
+            WaitingForJSButton := 0;
+          end;
+          if Key = kbEsc then
+            WaitingForJSButton := 0;
           Key := #0;
           Keyboard.LastKeyCode := SDLK_UNKNOWN;
           Update := TRUE;
@@ -803,7 +901,11 @@ program Mario;
                          Status := ST_KEYS;
                          WaitingForKey := 0;
                        end;
-                    4: Status := LastStatus;
+                    4: begin
+                         Status := ST_GAMEPAD;
+                         WaitingForJSButton := 0;
+                       end;
+                    5: Status := LastStatus;
                   end;
 
                 ST_KEYS:
@@ -815,6 +917,17 @@ program Mario;
                     WaitingForKey := Selected;
                     KeyVal[WaitingForKey] := '...';
                     Keyboard.LastKeyCode := SDLK_UNKNOWN;
+                  end;
+
+                ST_GAMEPAD:
+                  if Selected = 7 then
+                    Status := LastStatus
+                  else
+                  begin
+                    { Start waiting for gamepad button assignment }
+                    WaitingForJSButton := Selected;
+                    JSVal[WaitingForJSButton] := '...';
+                    Joystick.LastJSButton := -1;
                   end;
 
                 ST_SOUND:
@@ -891,19 +1004,22 @@ program Mario;
           Update := TRUE;
         end;
 
+        { Restore backgrounds for ALL 7 rows (not just active items).
+          This ensures stale text from a previous state with more items
+          is properly cleaned up on both double-buffer pages. }
         for k := 1 to 7 do
-        begin
           if BG[Page, k] <> 0 then
             PopBackGr (BG[Page, k]);
-        end;
 
         for k := 1 to 7 do
         begin
+          i := xp;
+          j := 56 + 14 * k;
+          { Always save background for all 7 rows so PopBackGr can
+            clean them up even when the new state has fewer items }
+          BG[Page, k] := PushBackGr (0, j, SCREEN_WIDTH, ht + 2);
           if Menu[k] <> '' then
           begin
-            i := xp;
-            j := 56 + 14 * k;
-            BG[Page, k] := PushBackGr (40, j, 250, ht + 2);
             if k = Selected then
               WriteText (i - 12, j, #16, 5);
             l := 15;
@@ -912,7 +1028,8 @@ program Mario;
             SetPalette (14, 63, 61, 31);
             WriteText (i + 8, j, Menu[k], l);
             { ST_KEYS items 1-6: draw dot + key name at fixed column }
-            if (Status = ST_KEYS) and (k <= 6) then
+            { Guard: only draw values after setup has run (OldStatus = Status) }
+            if (Status = ST_KEYS) and (OldStatus = ST_KEYS) and (k <= 6) then
             begin
               if (WaitingForKey = k) then
               begin
@@ -925,9 +1042,21 @@ program Mario;
               else
                 WriteText (i + 64, j, #7' ' + KeyVal[k], l);
             end;
+            if (Status = ST_GAMEPAD) and (OldStatus = ST_GAMEPAD) and (k <= 6) then
+            begin
+              if (WaitingForJSButton = k) then
+              begin
+                { Blink "..." while waiting for gamepad button }
+                if (SDL_GetTicks div 300) mod 2 = 0 then
+                  WriteText (i + 64, j, #7' ...         ', l)
+                else
+                  WriteText (i + 64, j, #7'              ', l);
+              end
+              else
+                WriteText (i + 64, j, #7' ' + JSVal[k], l);
+            end;
           end;
         end;
-
         ShowPage;
         BlinkPalette;
         ResetStack;

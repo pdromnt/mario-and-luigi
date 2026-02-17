@@ -19,6 +19,7 @@ interface
     Music,
     BGMusic,
     KeyBoard,
+    Joystick,
     sdl2;
 
   const
@@ -127,6 +128,9 @@ implementation
       OnlyDraw: Boolean;
       ScoreTick: Byte;
       InSubWorld: Boolean;
+      jsPausePrev,
+      jsSoundPrev,
+      jsStatusPrev: Boolean;
 
 
     procedure WriteTotalScore;
@@ -717,11 +721,22 @@ implementation
     Palettes.ReadPalette (Palette);
 
     TextStatus := Stat and (not PlayingMacro);
+    jsPausePrev := FALSE;
+    jsSoundPrev := FALSE;
+    jsStatusPrev := FALSE;
 
     repeat
 
       if not PlayingMacro then
       begin
+
+        { Edge-detect gamepad utility buttons and inject scancodes }
+        if jsPause and (not jsPausePrev) then Key := #25;   { P }
+        if jsSound and (not jsSoundPrev) then Key := #16;   { Q }
+        if jsStatus and (not jsStatusPrev) then Key := #31;  { S }
+        jsPausePrev := jsPause;
+        jsSoundPrev := jsSound;
+        jsStatusPrev := jsStatus;
 
         if Key = #31 then  { S - Status on/off }
         begin
