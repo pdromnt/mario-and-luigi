@@ -507,11 +507,26 @@ implementation
       2, 5, 9, 10, 11, 12:
         SmoothFill (X, Y, W, H);
       6, 7, 8:
-        case Options.BackGrType of
-          4: DrawBricks (X, Y, W, H);
-          5: LargeBricks (X, Y, W, H);
-          6: Pillar (X, Y, W, H);
-          7: Windows (X, Y, W, H);
+        begin
+          { These background renderers expect tile-sized calls (Buffers.W x Buffers.H).
+            When DrawSky is called with larger areas (e.g. full screen init),
+            tile the calls to avoid reading past sprite data bounds. }
+          j := Y;
+          while j < Y + H do
+          begin
+            i := X;
+            while i < X + W do
+            begin
+              case Options.BackGrType of
+                4: DrawBricks (i, j, Buffers.W, Buffers.H);
+                5: LargeBricks (i, j, Buffers.W, Buffers.H);
+                6: Pillar (i, j, Buffers.W, Buffers.H);
+                7: Windows (i, j, Buffers.W, Buffers.H);
+              end;
+              Inc(i, Buffers.W);
+            end;
+            Inc(j, Buffers.H);
+          end;
         end;
     end;
   end;
