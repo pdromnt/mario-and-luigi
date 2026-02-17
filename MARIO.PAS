@@ -446,13 +446,68 @@ program Mario;
   end;
 
   procedure Demo;
+  var
+    Hdr: DemoHeader;
   begin
+    { Try loading MARIO.DEM first; fall back to built-in DemoKeysData }
+    FillChar(Hdr, SizeOf(Hdr), 0);
+    if LoadMacroFromFile('MARIO.DEM', Hdr) then
+    begin
+      NewData;
+      Turbo := FALSE;
+      Data.Progress[plMario] := Hdr.Level;
+      case Hdr.Level of
+        0: PlayWorld(' ', ' ', Level_1a_Data, Options_1a_Data, Opt_1a_Data,
+             Level_1b_Data, Options_1b_Data, Options_1b_Data, plMario);
+        1: PlayWorld(' ', ' ', Level_2a_Data, Options_2a_Data, Opt_2a_Data,
+             Level_2b_Data, Options_2b_Data, Options_2b_Data, plMario);
+        2: PlayWorld(' ', ' ', Level_3a_Data, Options_3a_Data, Opt_3a_Data,
+             Level_3b_Data, Options_3b_Data, Options_3b_Data, plMario);
+        3: PlayWorld(' ', ' ', Level_5a_Data, Options_5a_Data, Opt_5a_Data,
+             Level_5b_Data, Options_5b_Data, Options_5b_Data, plMario);
+        4: PlayWorld(' ', ' ', Level_6a_Data, Options_6a_Data, Opt_6a_Data,
+             Level_6b_Data, Options_6b_Data, Options_6b_Data, plMario);
+        5: PlayWorld(' ', ' ', Level_4a_Data, Options_4a_Data, Opt_4a_Data,
+             Level_4b_Data, Options_4b_Data, Options_4b_Data, plMario);
+      end;
+    end
+    else
+    begin
+      { Built-in demo: level 6a (Progress=5) }
+      NewData;
+      Turbo := FALSE;
+      Data.Progress[plMario] := 5;
+      PlayMacro;
+      PlayWorld (' ', ' ', Level_6a_Data, Options_6a_Data, Options_6a_Data,
+        Level_6b_Data, Options_6b_Data, Options_6b_Data, plMario);
+    end;
+    StopMacro;
+  end;
+
+  procedure PlayDemoFile(const FileName: string; Level: Word);
+  var
+    Hdr: DemoHeader;
+  begin
+    FillChar(Hdr, SizeOf(Hdr), 0);
+    Hdr.Level := Level;
+    if not LoadMacroFromFile(FileName, Hdr) then Exit;
     NewData;
     Turbo := FALSE;
-    Data.Progress [plMario] := 5;
-    PlayMacro;
-    PlayWorld (' ', ' ', Level_6a_Data, Options_6a_Data, Options_6a_Data,
-      Level_6b_Data, Options_6b_Data, Options_6b_Data, plMario);
+    Data.Progress[plMario] := Hdr.Level;
+    case Hdr.Level of
+      0: PlayWorld(' ', ' ', Level_1a_Data, Options_1a_Data, Opt_1a_Data,
+           Level_1b_Data, Options_1b_Data, Options_1b_Data, plMario);
+      1: PlayWorld(' ', ' ', Level_2a_Data, Options_2a_Data, Opt_2a_Data,
+           Level_2b_Data, Options_2b_Data, Options_2b_Data, plMario);
+      2: PlayWorld(' ', ' ', Level_3a_Data, Options_3a_Data, Opt_3a_Data,
+           Level_3b_Data, Options_3b_Data, Options_3b_Data, plMario);
+      3: PlayWorld(' ', ' ', Level_5a_Data, Options_5a_Data, Opt_5a_Data,
+           Level_5b_Data, Options_5b_Data, Options_5b_Data, plMario);
+      4: PlayWorld(' ', ' ', Level_6a_Data, Options_6a_Data, Opt_6a_Data,
+           Level_6b_Data, Options_6b_Data, Options_6b_Data, plMario);
+      5: PlayWorld(' ', ' ', Level_4a_Data, Options_4a_Data, Opt_4a_Data,
+           Level_4b_Data, Options_4b_Data, Options_4b_Data, plMario);
+    end;
     StopMacro;
   end;
 
@@ -464,6 +519,7 @@ program Mario;
       IntroDone,
       TestVGAMode,
       Update: Boolean;
+      PlayUserDemo: Boolean;
       Counter: Integer;
       MacroKey: Char;
       Status,
@@ -477,7 +533,8 @@ program Mario;
                    ST_NUMPLAYERS,
                    ST_KEYS,
                    ST_SOUND,
-                   ST_GAMEPAD);
+                   ST_GAMEPAD,
+                   ST_DEMOS);
       Menu: array[1..7] of string[40];
       KeyVal: array[1..6] of string[14];   { Key name for ST_KEYS items }
       JSVal:  array[1..6] of string[14];   { Button name for ST_GAMEPAD items }
@@ -487,6 +544,9 @@ program Mario;
       WaitingForKey: Integer;
       WaitingForJSButton: Integer;
       Page: Byte;
+      DemoFiles: array[1..9] of string[12];
+      DemoLevels: array[1..9] of Word;
+      NumDemos: Integer;
 
     procedure Up;
     begin
@@ -504,6 +564,35 @@ program Mario;
         Inc (Selected);
     end;
 
+    procedure ScanDemos;
+    var
+      F: File;
+      si, Dummy: Integer;
+      Hdr: DemoHeader;
+      ReadBytes: LongInt;
+      Name: string[12];
+    begin
+      NumDemos := 0;
+      for si := 1 to 9 do
+      begin
+        Name := 'DEMO' + Chr(si + Ord('0')) + '.RPL';
+        Assign(F, Name);
+        Reset(F, 1);
+        if IOResult = 0 then
+        begin
+          BlockRead(F, Hdr, SizeOf(DemoHeader), ReadBytes);
+          Close(F);
+          Dummy := IOResult;
+          if ReadBytes = SizeOf(DemoHeader) then
+          begin
+            Inc(NumDemos);
+            DemoFiles[NumDemos] := Name;
+            DemoLevels[NumDemos] := Hdr.Level;
+          end;
+        end;
+      end;
+    end;
+
   begin
     Page := CurrentPage;
     Status := ST_NONE;
@@ -514,12 +603,14 @@ program Mario;
     WaitingForJSButton := 0;
     FillChar(KeyVal, SizeOf(KeyVal), 0);
     FillChar(JSVal, SizeOf(JSVal), 0);
+    NumDemos := 0;
 
     repeat
       if TestVGAMode then
         InitVGA;
       TestVGAMode := FALSE;
       IntroDone := FALSE;
+      PlayUserDemo := FALSE;
       NewData;
 
       PlayWorld (#0, #0, Intro_0_Data, Options_0_Data, Options_0_Data,
@@ -589,13 +680,13 @@ program Mario;
             ST_MENU:
               begin
                  Menu[1] := 'START';
-                 Menu[2] := 'OPTIONS';
-                 Menu[3] := 'END';
-                 Menu[4] := '';
+                 Menu[2] := 'REPLAYS';
+                 Menu[3] := 'OPTIONS';
+                 Menu[4] := 'END';
                  Menu[5] := '';
                  Menu[6] := '';
                  Menu[7] := '';
-                 NumOptions := 3;
+                 NumOptions := 4;
                  LastStatus := ST_MENU;
                end;
             ST_OPTIONS:
@@ -675,6 +766,17 @@ program Mario;
                  end;
                  NumOptions := 7;
                  LastStatus := ST_OPTIONS;
+              end;
+            ST_DEMOS:
+              begin
+                 ScanDemos;
+                 for i := 1 to NumDemos do
+                   Menu[i] := DemoFiles[i] + ' '#7' LVL ' + Chr(DemoLevels[i] + Ord('1'));
+                 Menu[NumDemos + 1] := 'BACK';
+                 for i := NumDemos + 2 to 7 do
+                   Menu[i] := '';
+                 NumOptions := NumDemos + 1;
+                 LastStatus := ST_MENU;
               end;
             ST_START:
               begin
@@ -878,8 +980,9 @@ program Mario;
                 ST_MENU:
                   case Selected of
                     1: Status := ST_START;
-                    2: Status := ST_OPTIONS;
-                    3: begin
+                    2: Status := ST_DEMOS;
+                    3: Status := ST_OPTIONS;
+                    4: begin
                          IntroDone := TRUE;
                          QuitGame := TRUE;
                        end;
@@ -929,6 +1032,12 @@ program Mario;
                     JSVal[WaitingForJSButton] := '...';
                     Joystick.LastJSButton := -1;
                   end;
+
+                ST_DEMOS:
+                  if Selected = NumDemos + 1 then
+                    Status := LastStatus
+                  else
+                    PlayUserDemo := TRUE;
 
                 ST_SOUND:
                   case Selected of
@@ -1064,11 +1173,19 @@ program Mario;
         { Only count toward demo timeout on the main menu }
         if Status = ST_MENU then
           Inc (Counter);
-      until IntroDone or (Counter = WAIT_BEFORE_DEMO);
+      until IntroDone or PlayUserDemo or (Counter = WAIT_BEFORE_DEMO);
       FadeDown (64);
 
       if not IntroDone then
-        Demo;
+      begin
+        if PlayUserDemo and (Selected >= 1) and (Selected <= NumDemos) then
+        begin
+          PlayDemoFile(DemoFiles[Selected], DemoLevels[Selected]);
+          QuitGame := FALSE;  { Demo exit is not a real quit }
+        end
+        else
+          Demo;
+      end;
     until IntroDone and (not TestVGAMode);
 
     if GameNumber <> -1 then

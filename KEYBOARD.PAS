@@ -4,6 +4,8 @@ unit Keyboard;
   {  Original (C) Copyright 1994-2001, Mike Wiering       }
   {  Preserves identical interface                         }
 
+  {$I-}  { I/O checking off — needed for file probing in NextDemoName/SaveMacroToFile }
+
 interface
 
   const
@@ -27,6 +29,7 @@ interface
     kbLeftArrow  = #75;
     kbRightArrow = #77;
     kbDownArrow  = #80;
+    kbF9         = #67;   { AT scancode $43 }
     kbF12        = #134;  { AT scancode $86 }
 
   var
@@ -43,6 +46,23 @@ interface
   procedure SaveMacro;
   procedure StopMacro;
   function PlayingMacro: Boolean;
+
+  type
+    DemoHeader = record
+      Level: Word;
+      Seed: LongInt;
+      PosX: Integer;    { Player X pixel position at record start }
+      PosY: Integer;    { Player Y pixel position at record start }
+      ViewX: Integer;   { XView scroll position at record start }
+    end;
+
+  var
+    MacroHdr: DemoHeader;  { Populated by LoadMacroFromFile for PlayWorld }
+
+  procedure SaveMacroToFile(const FileName: string; var Hdr: DemoHeader);
+  function LoadMacroFromFile(const FileName: string;
+    var Hdr: DemoHeader): Boolean;
+  function NextDemoName: string;
 
   function kbHit: Boolean;
 
@@ -165,6 +185,7 @@ implementation
       SDLK_LEFT:      MapSDLKeyToScancode := 75;
       SDLK_RIGHT:     MapSDLKeyToScancode := 77;
       SDLK_DOWN:      MapSDLKeyToScancode := 80;
+      SDLK_F9:        MapSDLKeyToScancode := 67;
       SDLK_F12:       MapSDLKeyToScancode := 134;
     else
       MapSDLKeyToScancode := 0;
@@ -243,6 +264,7 @@ implementation
     HandlerActive := TRUE;
     KeyHit := FALSE;
     Key := #0;
+    FillChar(MacroHdr, SizeOf(MacroHdr), 0);
     { Default key bindings }
     BindJump  := LongInt(SDLK_LALT);
     BindRun   := LongInt(SDLK_LCTRL);
@@ -274,8 +296,11 @@ implementation
     Recording := TRUE;
     Playing := FALSE;
     FillChar(SeqPos, SizeOf(SeqPos), 0);
-    FillChar(Sequence, SizeOf(SeqPos), 0);
-    RandSeed := 0;
+    FillChar(Sequence, SizeOf(Sequence), 0);
+    { Note: RandSeed is NOT reset here. For built-in demo recording
+      (cheat code 76DD), RandSeed is set to 0 by PlayMacro before
+      playback. For F9 recordings we save/restore RandSeed via the
+      .RPL file header so mid-level recordings replay correctly. }
   end;
 
   procedure PlayMacro;
@@ -305,6 +330,78 @@ implementation
     Close(F);
     Recording := FALSE;
     FillChar(SeqPos, SizeOf(SeqPos), 0);
+  end;
+
+  procedure SaveMacroToFile(const FileName: string; var Hdr: DemoHeader);
+  var
+    F: File;
+    i: Integer;
+  begin
+    Assign(F, FileName);
+    ReWrite(F, 1);
+    if IOResult = 0 then
+    begin
+      BlockWrite(F, Hdr, SizeOf(DemoHeader));
+      BlockWrite(F, Sequence, SizeOf(Sequence));
+      Close(F);
+    end;
+    i := IOResult;
+    Recording := FALSE;
+    FillChar(SeqPos, SizeOf(SeqPos), 0);
+  end;
+
+  function LoadMacroFromFile(const FileName: string;
+    var Hdr: DemoHeader): Boolean;
+  var
+    F: File;
+    ReadBytes: LongInt;
+    i: Integer;
+  begin
+    LoadMacroFromFile := FALSE;
+    Assign(F, FileName);
+    Reset(F, 1);
+    if IOResult <> 0 then Exit;
+    BlockRead(F, Hdr, SizeOf(DemoHeader), ReadBytes);
+    if (IOResult <> 0) or (ReadBytes <> SizeOf(DemoHeader)) then
+    begin
+      Close(F);
+      i := IOResult;
+      Exit;
+    end;
+    BlockRead(F, Sequence, SizeOf(Sequence), ReadBytes);
+    Close(F);
+    i := IOResult;
+    if ReadBytes = SizeOf(Sequence) then
+    begin
+      Playing := TRUE;
+      Recording := FALSE;
+      FillChar(SeqPos, SizeOf(SeqPos), 0);
+      RandSeed := Hdr.Seed;
+      MacroHdr := Hdr;     { Store for PlayWorld to read on init }
+      LoadMacroFromFile := TRUE;
+    end;
+  end;
+
+  function NextDemoName: string;
+  var
+    F: File;
+    i, Dummy: Integer;
+    Name: string;
+  begin
+    NextDemoName := '';
+    for i := 1 to 9 do
+    begin
+      Name := 'DEMO' + Chr(i + Ord('0')) + '.RPL';
+      Assign(F, Name);
+      Reset(F, 1);
+      if IOResult <> 0 then
+      begin
+        NextDemoName := Name;
+        Exit;
+      end;
+      Close(F);
+      Dummy := IOResult;
+    end;
   end;
 
   function PlayingMacro: Boolean;

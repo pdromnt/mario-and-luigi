@@ -46,6 +46,7 @@ interface
 
   procedure InitPlayerFigures;
   procedure InitPlayer (InitX, InitY: Integer; Name: Byte);
+  procedure GetPlayerPos (var PX, PY: Integer);
   procedure DrawPlayer;
   procedure ErasePlayer;
   procedure DoDemo;
@@ -210,6 +211,12 @@ implementation
     Star := False;
     Growing := False;
     EarthQuake := False;
+  end;
+
+  procedure GetPlayerPos (var PX, PY: Integer);
+  begin
+    PX := X;
+    PY := Y;
   end;
 
   procedure DrawDemo;

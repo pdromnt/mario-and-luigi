@@ -33,6 +33,7 @@ implementation
 
   const
     CheatsUsed: Integer = 0;
+    NUM_LEV = 6;  { Must match MARIO.PAS }
 
   function PlayWorld (N1, N2: Char; var Map1; var Opt1; var Opt1b;
                       var Map2; var Opt2; var Opt2b; Player: Byte): Boolean;
@@ -131,6 +132,11 @@ implementation
       jsPausePrev,
       jsSoundPrev,
       jsStatusPrev: Boolean;
+      DemoRecording: Boolean;
+      RecHdr: DemoHeader;
+      DemoName: string;
+      RecBackGrAddr: array[0..MAX_PAGE] of Integer;
+      WasPlayingMacro: Boolean;
 
 
     procedure WriteTotalScore;
@@ -606,6 +612,7 @@ implementation
     ShowScore := FALSE;
     ScoreTick := 0;
     InSubWorld := FALSE;
+    DemoRecording := FALSE;
 
     if not Turbo then
     begin
@@ -629,6 +636,13 @@ implementation
 
     XView := 0;
     YView := 0;
+
+    { If playing back a replay with saved position, reposition before draw }
+    if PlayingMacro and (MacroHdr.PosX <> 0) then
+    begin
+      InitPlayer(MacroHdr.PosX, MacroHdr.PosY, Player);
+      XView := MacroHdr.ViewX;
+    end;
 
     FillChar (LastXView, SizeOf (LastXView), 0);
     SetView (XView, YView);
@@ -720,7 +734,11 @@ implementation
     FadeUp (64);
     Palettes.ReadPalette (Palette);
 
-    TextStatus := Stat and (not PlayingMacro);
+    WasPlayingMacro := PlayingMacro;
+    TextStatus := Stat and (not WasPlayingMacro);
+    if not DemoRecording then
+      FillChar(RecHdr, SizeOf(RecHdr), 0);
+    FillChar(RecBackGrAddr, SizeOf(RecBackGrAddr), 0);
     jsPausePrev := FALSE;
     jsSoundPrev := FALSE;
     jsStatusPrev := FALSE;
@@ -762,6 +780,30 @@ implementation
           Key := #255;
         end;
 
+        if Key = kbF9 then
+        begin
+          if not DemoRecording then
+          begin
+            { Start recording — capture full game state }
+            FillChar(RecHdr, SizeOf(RecHdr), 0);
+            RecHdr.Level := Data.Progress[Player] mod NUM_LEV;
+            RecHdr.Seed := RandSeed;
+            GetPlayerPos(RecHdr.PosX, RecHdr.PosY);
+            RecHdr.ViewX := XView;
+            RecordMacro;
+            DemoRecording := TRUE;
+          end
+          else
+          begin
+            { Stop recording and save }
+            DemoName := NextDemoName;
+            if DemoName <> '' then
+              SaveMacroToFile(DemoName, RecHdr);
+            DemoRecording := FALSE;
+          end;
+          Key := #0;
+        end;
+
         if Key in [#197, #198] then  { Pause/Break }
         begin
           PauseMusic;
@@ -788,6 +830,11 @@ implementation
         if ShowObjects then
           HideTempObj;
         HideStatus;
+        if RecBackGrAddr[CurrentPage] <> 0 then
+        begin
+          PopBackGr(RecBackGrAddr[CurrentPage]);
+          RecBackGrAddr[CurrentPage] := 0;
+        end;
         if ShowScore then
           HideTotalBack;
         ErasePlayer;
@@ -819,6 +866,14 @@ implementation
             Waiting := TRUE;
             TextCounter := 0;
             StopBGMusic;
+            { Auto-save demo recording on level complete }
+            if DemoRecording then
+            begin
+              DemoName := NextDemoName;
+              if DemoName <> '' then
+                SaveMacroToFile(DemoName, RecHdr);
+              DemoRecording := FALSE;
+            end;
           end;
           Inc (TextCounter);
           if (not ShowScore) and (TextCounter in [50..50 + MAX_PAGE]) then
@@ -933,6 +988,16 @@ implementation
         if Options.Stars <> 0 then
           ShowStars;
         ShowGlitter;
+
+        if DemoRecording then
+        begin
+          RecBackGrAddr[CurrentPage] := PushBackGr(XView + SCREEN_WIDTH - 30, 16, 30, 12);
+          if (SDL_GetTicks div 500) mod 2 = 0 then
+          begin
+            SetFont(0, Bold + Shadow);
+            WriteText(XView + SCREEN_WIDTH - 28, 17, 'REC', 4);
+          end;
+        end;
       end;
 
       LastXView [CurrentPage] := XView;
@@ -953,6 +1018,15 @@ implementation
 
       if InPipe and PlayingMacro then
         GameDone := TRUE;
+
+      { Auto-end demo playback when sequence runs out }
+      if WasPlayingMacro and (not PlayingMacro) then
+      begin
+        ResetKeyBoard;  { Clear stale key states so Mario doesn't jump }
+        GameDone := TRUE;
+        QuitGame := TRUE;
+        StopBGMusic;
+      end;
 
       if InPipe and (not GameDone) and (not Waiting) then
       begin
