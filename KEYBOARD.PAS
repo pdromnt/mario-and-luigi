@@ -125,6 +125,7 @@ implementation
   const
     Recording: Boolean = FALSE;
     Playing: Boolean = FALSE;
+    PlaybackJustEnded: Boolean = FALSE;  { Set when Playing transitions to FALSE mid-frame }
 
   const
     KeyMap: Array[1..MaxKeys] of Boolean =
@@ -199,6 +200,7 @@ implementation
     sc: Byte;
     sym: TSDL_Keycode;
   begin
+    PlaybackJustEnded := FALSE;  { Clear per-frame flag }
     while SDL_PollEvent(@Event) <> 0 do
     begin
       case Event.type_ of
@@ -286,6 +288,7 @@ implementation
   begin
     Recording := FALSE;
     Playing := FALSE;
+    PlaybackJustEnded := FALSE;
     for i := 1 to MaxKeys do
       KeyMap[i] := False;
     Key := #0;
@@ -316,6 +319,7 @@ implementation
   begin
     Playing := FALSE;
     Recording := FALSE;
+    PlaybackJustEnded := FALSE;
   end;
 
   procedure SaveMacro;
@@ -391,7 +395,7 @@ implementation
     NextDemoName := '';
     for i := 1 to 9 do
     begin
-      Name := 'DEMO' + Chr(i + Ord('0')) + '.RPL';
+      Name := 'REPLAY' + Chr(i + Ord('0')) + '.RPL';
       Assign(F, Name);
       Reset(F, 1);
       if IOResult <> 0 then
@@ -412,6 +416,12 @@ implementation
   function Check (KeyNr: Byte; Press: Boolean): Boolean;
   begin
     Check := Press;
+    { If playback just ended this frame, suppress all key reads until next frame }
+    if PlaybackJustEnded then
+    begin
+      Check := FALSE;
+      Exit;
+    end;
     if Playing or Recording then
     begin
       if Recording then
@@ -427,7 +437,11 @@ implementation
       if Playing then
       begin
         if Sequence[KeyNr, SeqPos[KeyNr]] = 0 then
-          Playing := FALSE
+        begin
+          Playing := FALSE;
+          PlaybackJustEnded := TRUE;  { Suppress remaining key reads this frame }
+          Check := FALSE;
+        end
         else
         begin
           Dec(Sequence[KeyNr, SeqPos[KeyNr]]);

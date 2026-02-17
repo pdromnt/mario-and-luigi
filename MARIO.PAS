@@ -575,7 +575,7 @@ program Mario;
       NumDemos := 0;
       for si := 1 to 9 do
       begin
-        Name := 'DEMO' + Chr(si + Ord('0')) + '.RPL';
+        Name := 'REPLAY' + Chr(si + Ord('0')) + '.RPL';
         Assign(F, Name);
         Reset(F, 1);
         if IOResult = 0 then
