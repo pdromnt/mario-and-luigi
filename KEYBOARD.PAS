@@ -60,6 +60,18 @@ interface
   { SDL-specific: must be called each frame to process events }
   procedure PollKeyboard;
 
+  var
+    { Configurable SDL keycodes for gameplay keys (LongInt = TSDL_Keycode) }
+    BindJump:  LongInt;   { maps to KeyMap[keyAlt],   default: SDLK_LALT  }
+    BindRun:   LongInt;   { maps to KeyMap[keyCtrl],  default: SDLK_LCTRL }
+    BindFire:  LongInt;   { maps to KeyMap[keySpace], default: SDLK_SPACE }
+    BindPause:  LongInt;   { maps to Key := kbP,       default: SDLK_p     }
+    BindSound:  LongInt;   { maps to Key := kbQ,       default: SDLK_q     }
+    BindStatus: LongInt;   { maps to Key := kbS,       default: SDLK_s     }
+
+    { Last raw SDL keycode pressed — for key assignment UI }
+    LastKeyCode: LongInt;
+
 implementation
 
   uses
@@ -162,6 +174,7 @@ implementation
   var
     Event: TSDL_Event;
     sc: Byte;
+    sym: TSDL_Keycode;
   begin
     while SDL_PollEvent(@Event) <> 0 do
     begin
@@ -169,36 +182,51 @@ implementation
         SDL_KEYDOWN:
           begin
             KeyHit := True;
-            sc := MapSDLKeyToScancode(Event.key.keysym.sym);
+            sym := Event.key.keysym.sym;
+            LastKeyCode := sym;
+
+            { Scancode mapping for menu navigation & single-press actions }
+            sc := MapSDLKeyToScancode(sym);
             if sc <> 0 then
               Key := Chr(sc);
 
-            case Event.key.keysym.sym of
-              SDLK_LEFT:                     KeyMap[keyLeft] := True;
-              SDLK_RIGHT:                    KeyMap[keyRight] := True;
-              SDLK_UP:                       KeyMap[keyUp] := True;
-              SDLK_DOWN:                     KeyMap[keyDown] := True;
-              SDLK_LALT, SDLK_RALT:         KeyMap[keyAlt] := True;
-              SDLK_LCTRL, SDLK_RCTRL:       KeyMap[keyCtrl] := True;
-              SDLK_LSHIFT:                   KeyMap[keyShiftL] := True;
-              SDLK_RSHIFT:                   KeyMap[keyShiftR] := True;
-              SDLK_SPACE:                    KeyMap[keySpace] := True;
-            end;
+            { Configurable Pause/Sound/Status: inject scancodes so PLAY.PAS needs no changes }
+            if sym = BindPause  then Key := kbP;
+            if sym = BindSound  then Key := kbQ;
+            if sym = BindStatus then Key := kbS;
+
+            { Non-remappable directional keys }
+            if sym = SDLK_LEFT then   KeyMap[keyLeft] := True;
+            if sym = SDLK_RIGHT then  KeyMap[keyRight] := True;
+            if sym = SDLK_UP then     KeyMap[keyUp] := True;
+            if sym = SDLK_DOWN then   KeyMap[keyDown] := True;
+
+            { Non-remappable shift keys }
+            if sym = SDLK_LSHIFT then KeyMap[keyShiftL] := True;
+            if sym = SDLK_RSHIFT then KeyMap[keyShiftR] := True;
+
+            { Configurable gameplay keys }
+            if sym = BindJump then KeyMap[keyAlt] := True;
+            if sym = BindRun then  KeyMap[keyCtrl] := True;
+            if sym = BindFire then KeyMap[keySpace] := True;
           end;
 
         SDL_KEYUP:
           begin
-            case Event.key.keysym.sym of
-              SDLK_LEFT:                     KeyMap[keyLeft] := False;
-              SDLK_RIGHT:                    KeyMap[keyRight] := False;
-              SDLK_UP:                       KeyMap[keyUp] := False;
-              SDLK_DOWN:                     KeyMap[keyDown] := False;
-              SDLK_LALT, SDLK_RALT:         KeyMap[keyAlt] := False;
-              SDLK_LCTRL, SDLK_RCTRL:       KeyMap[keyCtrl] := False;
-              SDLK_LSHIFT:                   KeyMap[keyShiftL] := False;
-              SDLK_RSHIFT:                   KeyMap[keyShiftR] := False;
-              SDLK_SPACE:                    KeyMap[keySpace] := False;
-            end;
+            sym := Event.key.keysym.sym;
+
+            { Non-remappable keys }
+            if sym = SDLK_LEFT then   KeyMap[keyLeft] := False;
+            if sym = SDLK_RIGHT then  KeyMap[keyRight] := False;
+            if sym = SDLK_UP then     KeyMap[keyUp] := False;
+            if sym = SDLK_DOWN then   KeyMap[keyDown] := False;
+            if sym = SDLK_LSHIFT then KeyMap[keyShiftL] := False;
+            if sym = SDLK_RSHIFT then KeyMap[keyShiftR] := False;
+
+            { Configurable gameplay keys }
+            if sym = BindJump then KeyMap[keyAlt] := False;
+            if sym = BindRun then  KeyMap[keyCtrl] := False;
+            if sym = BindFire then KeyMap[keySpace] := False;
           end;
 
         SDL_QUITEV:
@@ -212,6 +240,14 @@ implementation
     HandlerActive := TRUE;
     KeyHit := FALSE;
     Key := #0;
+    { Default key bindings }
+    BindJump  := LongInt(SDLK_LALT);
+    BindRun   := LongInt(SDLK_LCTRL);
+    BindFire  := LongInt(SDLK_SPACE);
+    BindPause  := LongInt(SDLK_p);
+    BindSound  := LongInt(SDLK_q);
+    BindStatus := LongInt(SDLK_s);
+    LastKeyCode := LongInt(SDLK_UNKNOWN);
   end;
 
   procedure KeyBoardDone;
