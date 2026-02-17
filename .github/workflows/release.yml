@@ -20,23 +20,15 @@ jobs:
       - name: Install Free Pascal (i386)
         shell: bash
         run: |
-          curl -L -o fpc-installer.exe \
-            "https://sourceforge.net/projects/freepascal/files/Win32/3.2.2/fpc-3.2.2.i386-win32.exe/download"
-          # Run installer silently; it installs to C:\FPC\3.2.2
-          ./fpc-installer.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR="C:\\FPC\\3.2.2"
-          echo "C:\\FPC\\3.2.2\\bin\\i386-Win32" >> "$GITHUB_PATH"
-
-      - name: Compile icon resource
-        shell: cmd
-        run: |
-          if exist icon.ico if exist mario.rc (
-            "C:\FPC\3.2.2\bin\i386-Win32\windres.exe" --preprocessor=cat -i mario.rc -o mario.res
-          )
+          curl -L -o fpc.zip \
+            "https://github.com/castle-engine/castle-fpc/releases/download/snapshot/fpc-win32-i386.zip"
+          7z x fpc.zip -oC:\\
+          echo "C:\\fpc\\bin" >> "$GITHUB_PATH"
 
       - name: Compile
         shell: cmd
         run: |
-          ppc386 -Mtp -Ci- -Cr- -Sg -Si -O2 -FuSDL2-for-Pascal -Fu. -FE. MARIO.PAS
+          ppc386 -Mtp -Ci- -Cr- -Sg -Si -O2 -FuC:\fpc\units\i386-win32\* -FuSDL2-for-Pascal -Fu. -FE. MARIO.PAS
 
       - name: Package
         shell: bash
@@ -69,7 +61,7 @@ jobs:
 
       - name: Compile
         run: |
-          fpc -Mtp -Ci- -Cr- -Sg -Si -O2 -FuSDL2-for-Pascal -Fu. -omario MARIO.PAS
+          fpc -Mtp -Ci- -Cr- -Sg -Si -O2 -Fl$(brew --prefix)/lib -FuSDL2-for-Pascal -Fu. -omario MARIO.PAS
 
       - name: Create .app bundle
         run: |
