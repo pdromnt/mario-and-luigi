@@ -75,9 +75,9 @@ implementation
       if Scroll > 0 then
         for j := LastXView [Page] to XView do
         begin
-          i := j - W - W;
-          if i >= 0 then
-            PutPixel (i, 0, 0);
+          { Original cleared enemy column markers at row 0 here via PutPixel.
+            In VGA Mode X, row 0 was above the visible area due to CRTC
+            start address offset. In SDL2 row 0 is visible, so skip it. }
           i := W - j mod W - 1;
           Redraw (j div W + NH + 1, i);
         end;
@@ -124,6 +124,7 @@ implementation
       CountingScore,
       ShowObjects: Boolean;
       OnlyDraw: Boolean;
+      ScoreTick: Byte;
 
 
     procedure WriteTotalScore;
@@ -141,14 +142,20 @@ implementation
 
     procedure ShowTotalBack;
     begin
-      if Passed and CountingScore then
-        Beep (4 * 880);
       TotalBackGrAddr[CurrentPage] := PushBackGr (XView + 160, 120, 120, 8);
-      if Passed and CountingScore then
-        Beep (2 * 880);
       WriteTotalScore;
+      { Play a tick sound while counting down the score.
+        Original called Beep(4*880), Beep(2*880), Beep(0) within one frame
+        but with SDL2 async audio only the last value would be heard (silence).
+        Alternate between high and low tones each tick for a pleasant effect. }
       if Passed and CountingScore then
-        Beep (0);
+      begin
+        if Odd(ScoreTick) then
+          Beep (880)
+        else
+          Beep (2 * 880);
+        Inc(ScoreTick);
+      end;
     end;
 
     procedure HideTotalBack;
@@ -371,6 +378,7 @@ implementation
     InitLevelScore;
     FillChar (TotalBackGrAddr, SizeOf (TotalBackGrAddr), #0);
     ShowScore := FALSE;
+    ScoreTick := 0;
 
     if not Turbo then
     begin
@@ -627,6 +635,17 @@ implementation
 
       if (Key in [kbEsc, #129]) then
         QuitGame := True;  { Esc }
+
+      { DEBUG: Delete key skips to next level }
+      if Key = #83 then  { Delete key }
+      begin
+        Passed := TRUE;
+        Waiting := TRUE;
+        TextCounter := 200;
+        PipeCode [1] := #$E7;
+        InPipe := TRUE;
+        Key := #255;
+      end;
 
       MoveScreen;
       RunRemove;
