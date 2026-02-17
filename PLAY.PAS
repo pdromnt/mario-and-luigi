@@ -671,6 +671,12 @@ implementation
         PlaySubLevelMusic
       else
         PlayLevelMusic(Ord(N2) - Ord('0'));
+    end
+    else if PlayingMacro and (MacroHdr.Level <= 5) then
+    begin
+      { Demos/replays pass N2=' '; derive music from the header }
+      StopBGMusic;
+      PlayLevelMusic(MacroHdr.Level + 1);
     end;
 
   Restart:
