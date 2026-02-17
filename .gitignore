@@ -22,6 +22,10 @@
 *.~*
 *~
 
+# Log files
+*.log
+*.txt
+
 # OS junk
 Thumbs.db
 Desktop.ini
