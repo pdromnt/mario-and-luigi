@@ -28,6 +28,9 @@
 *.log
 *.txt
 
+# Build output directory
+OUT/
+
 # OS junk
 Thumbs.db
 Desktop.ini
