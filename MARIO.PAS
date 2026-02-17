@@ -33,15 +33,21 @@ program Mario;
     WAIT_BEFORE_DEMO = 500;
 
   type
-    ConfigData = record
+    {$A2}  { Word alignment (TP compatible) — needed for file compatibility }
+    SettingsData = record
       Sound: Boolean;
       SLine: Boolean;
-      Games: array[0..MAX_SAVE - 1] of GameData;
       UseJS: Boolean;
       JSDat: JoyRec;
     end;
 
-    ConfigFile = file of ConfigData;
+    SaveData = record
+      Games: array[0..MAX_SAVE - 1] of GameData;
+    end;
+    {$A+}  { Restore default alignment }
+
+    SettingsFile = file of SettingsData;
+    SaveFile = file of SaveData;
 
   var
     GameNumber: Integer;
@@ -50,7 +56,8 @@ program Mario;
     CurPlayer: Integer;
     Passed,
     EndGame: Boolean;
-    Config: ConfigData;
+    Settings: SettingsData;
+    Saves: SaveData;
 
   {$I sprites\BLOCK000.inc}
 
@@ -95,56 +102,101 @@ program Mario;
     GetConfigName := S;
   end;
 
+  function GetSaveName: string;
+    var
+      S: string;
+      Len: byte absolute S;
+  begin
+    S := ParamStr (0);
+    if Len >= 3 then
+    begin
+      S[Len - 2] := 'S';
+      S[Len - 1] := 'A';
+      S[Len - 0] := 'V';
+    end
+    else
+      S := 'MARIO.SAV';
+    GetSaveName := S;
+  end;
+
   procedure ReadConfig;
     var
-      i, j: Integer;
-      F: ConfigFile;
+      i: Integer;
+      FC: SettingsFile;
+      FS: SaveFile;
+      SettingsOK, SavesOK: Boolean;
   begin
+    SettingsOK := FALSE;
+    SavesOK := FALSE;
+
   {$IFDEF MENU}
-    Assign (F, GetConfigName);
-    Reset (F);
-    Read (F, Config);
-    Close (F);
-    if IOResult <> 0 then
+    { Read settings (MARIO.CFG) }
+    Assign (FC, GetConfigName);
+    Reset (FC);
+    Read (FC, Settings);
+    Close (FC);
+    SettingsOK := IOResult = 0;
+
+    { Read save games (MARIO.SAV) }
+    Assign (FS, GetSaveName);
+    Reset (FS);
+    Read (FS, Saves);
+    Close (FS);
+    SavesOK := IOResult = 0;
   {$ENDIF}
+
+    if not SettingsOK then
     begin
-      NewData;
-      for i := 0 to MAX_SAVE - 1 do
-        Config.Games[i] := Data;
-      with Config do
+      with Settings do
       begin
         SLine := TRUE;
         Sound := TRUE;
         UseJS := FALSE;
       end;
+    end;
+
+    if not SavesOK then
+    begin
+      NewData;
+      for i := 0 to MAX_SAVE - 1 do
+        Saves.Games[i] := Data;
       GameNumber := -1;
     end;
 
-    with Config do
+    with Settings do
     begin
       Play.Stat := SLine;
       Buffers.BeeperSound := Sound;
     end;
-
-    { Name checksum removed - not relevant for SDL port }
   end;
 
   procedure WriteConfig;
     var
-      F: ConfigFile;
+      FC: SettingsFile;
+      FS: SaveFile;
   begin
-    with Config do
+    with Settings do
     begin
       SLine := Play.Stat;
       Sound := Buffers.BeeperSound;
     end;
   {$IFDEF MENU}
-    Assign (F, GetConfigName);
-    ReWrite (F);
+    { Write settings (MARIO.CFG) }
+    Assign (FC, GetConfigName);
+    ReWrite (FC);
     if IOResult = 0 then
     begin
-      Write (F, Config);
-      Close (F);
+      Write (FC, Settings);
+      Close (FC);
+    end;
+
+    { Write save games (MARIO.SAV) }
+    Assign (FS, GetSaveName);
+    ReWrite (FS);
+    if IOResult = 0 then
+    begin
+      Write (FS, Saves);
+      Close (FS);
     end;
   {$ENDIF}
   end;
@@ -165,8 +217,8 @@ program Mario;
       jsEnabled := FALSE;
       ReadJoystick;
     end;
-    Config.UseJS := jsEnabled;
-    Config.JSDat := jr;
+    Settings.UseJS := jsEnabled;
+    Settings.JSDat := jr;
     Key := #0;
   end;
 
@@ -392,7 +444,7 @@ program Mario;
                  Menu[4] := '';
                  Menu[5] := '';
                  for i := 1 to 3 do
-                   with Config.Games[i - 1] do
+                   with Saves.Games[i - 1] do
                      if (Progress[plMario] = 0) and (Progress[plLuigi] = 0) then
                        Menu[i] := Menu[i] + 'EMPTY'
                      else
@@ -496,22 +548,22 @@ program Mario;
               ST_LOAD:
                 begin
                   GameNumber := Selected - 1;
-                  Config.Games[GameNumber].NumPlayers := 1;
-                  with Config.Games[GameNumber] do
+                  Saves.Games[GameNumber].NumPlayers := 1;
+                  with Saves.Games[GameNumber] do
                     if (Progress[plMario] = 0) and (Progress[plLuigi] = 0) then
                       Status := ST_NUMPLAYERS
                     else
                     begin
                       IntroDone := TRUE;
-                      NextNumPlayers := Config.Games[GameNumber].NumPlayers;
+                      NextNumPlayers := Saves.Games[GameNumber].NumPlayers;
                     end;
                 end;
 
               ST_ERASE:
                 begin
                   NewData;
-                  Config.Games[Selected - 1] := Data;
-                  Config.Games[Selected - 1].NumPlayers := 1;
+                  Saves.Games[Selected - 1] := Data;
+                  Saves.Games[Selected - 1].NumPlayers := 1;
                   GameNumber := -1;
                 end;
 
@@ -560,7 +612,7 @@ program Mario;
     until IntroDone and (not TestVGAMode);
 
     if GameNumber <> -1 then
-      Data := Config.Games[GameNumber];
+      Data := Saves.Games[GameNumber];
     Data.NumPlayers := NextNumPlayers;
   end;  { Intro }
 
@@ -606,8 +658,8 @@ begin  { Mario }
   ReadConfig;
   ReadCmdLine;
 
-  jr := Config.JSDat;
-  jsEnabled := jsDetected and Config.UseJS;
+  jr := Settings.JSDat;
+  jsEnabled := jsDetected and Settings.UseJS;
 
   ResetKeyBoard;
 
@@ -700,7 +752,7 @@ begin  { Mario }
       (Data.Lives [plMario] + Data.Lives [plLuigi] = 0);
 
     if GameNumber <> -1 then
-      Config.Games[GameNumber] := Data;
+      Saves.Games[GameNumber] := Data;
 
 {$IFDEF MENU}
   until QuitGame;

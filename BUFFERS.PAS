@@ -45,6 +45,7 @@ interface
     BeeperSound: Boolean = TRUE;
 
   type
+    {$A2}  { Word alignment (TP compatible) — needed for save game file compatibility }
     GameData = record
       NumPlayers: Integer;
       Progress: array[plMario..plLuigi] of Integer;
@@ -53,6 +54,7 @@ interface
       Score: array[plMario..plLuigi] of LongInt;
       Mode: array[plMario..plLuigi] of Byte;
     end;
+    {$A+}  { Restore default alignment }
 
   const
     PlayerName: array [plMario..plLuigi] of string [5] = ('MARIO', 'LUIGI');
