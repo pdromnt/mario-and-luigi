@@ -39,6 +39,13 @@ program Mario;
       SLine: Boolean;
       UseJS: Boolean;
       JSDat: JoyRec;
+      { Configurable key bindings — SDL keycodes stored as LongInt }
+      KeyJump:  LongInt;   { default: SDLK_LALT  }
+      KeyRun:   LongInt;   { default: SDLK_LCTRL }
+      KeyFire:  LongInt;   { default: SDLK_SPACE }
+      KeyPause:  LongInt;   { default: SDLK_p     }
+      KeySound:  LongInt;   { default: SDLK_q     }
+      KeyStatus: LongInt;   { default: SDLK_s     }
     end;
 
     SaveData = record
@@ -83,6 +90,49 @@ program Mario;
       Mode [plMario] := mdSmall;
       Mode [plLuigi] := mdSmall;
     end;
+  end;
+
+  procedure ApplyDefaultKeyBindings;
+  begin
+    Settings.KeyJump  := LongInt(SDLK_LALT);
+    Settings.KeyRun   := LongInt(SDLK_LCTRL);
+    Settings.KeyFire  := LongInt(SDLK_SPACE);
+    Settings.KeyPause  := LongInt(SDLK_p);
+    Settings.KeySound  := LongInt(SDLK_q);
+    Settings.KeyStatus := LongInt(SDLK_s);
+  end;
+
+  procedure ApplyKeyBindings;
+  { Copy key bindings from Settings record to Keyboard unit variables }
+  begin
+    Keyboard.BindJump  := Settings.KeyJump;
+    Keyboard.BindRun   := Settings.KeyRun;
+    Keyboard.BindFire  := Settings.KeyFire;
+    Keyboard.BindPause  := Settings.KeyPause;
+    Keyboard.BindSound  := Settings.KeySound;
+    Keyboard.BindStatus := Settings.KeyStatus;
+  end;
+
+  function GetKeyNameStr(kc: LongInt): string;
+  { Convert SDL keycode to uppercase display name, max 12 chars }
+  var
+    P: PAnsiChar;
+    S: string;
+    i: Integer;
+  begin
+    P := SDL_GetKeyName(kc);
+    S := '';
+    i := 0;
+    while (P[i] <> #0) and (i < 12) do
+    begin
+      if (P[i] >= 'a') and (P[i] <= 'z') then
+        S := S + Chr(Ord(P[i]) - 32)
+      else
+        S := S + P[i];
+      Inc(i);
+    end;
+    if S = '' then S := '???';
+    GetKeyNameStr := S;
   end;
 
   function GetConfigName: string;
@@ -153,7 +203,15 @@ program Mario;
         Sound := TRUE;
         UseJS := FALSE;
       end;
+      ApplyDefaultKeyBindings;
     end;
+
+    { Validate key bindings — old config files won't have them (fields = 0) }
+    if Settings.KeyJump = 0 then
+      ApplyDefaultKeyBindings;
+    { KeyStatus added later — old configs may have valid Jump..Sound but no Status }
+    if Settings.KeyStatus = 0 then
+      Settings.KeyStatus := LongInt(SDLK_s);
 
     if not SavesOK then
     begin
@@ -168,6 +226,8 @@ program Mario;
       Play.Stat := SLine;
       Buffers.BeeperSound := Sound;
     end;
+
+    ApplyKeyBindings;
   end;
 
   procedure WriteConfig;
@@ -180,6 +240,13 @@ program Mario;
       SLine := Play.Stat;
       Sound := Buffers.BeeperSound;
     end;
+    { Copy current key bindings from Keyboard unit to Settings for saving }
+    Settings.KeyJump  := LongInt(Keyboard.BindJump);
+    Settings.KeyRun   := LongInt(Keyboard.BindRun);
+    Settings.KeyFire  := LongInt(Keyboard.BindFire);
+    Settings.KeyPause  := LongInt(Keyboard.BindPause);
+    Settings.KeySound  := LongInt(Keyboard.BindSound);
+    Settings.KeyStatus := LongInt(Keyboard.BindStatus);
   {$IFDEF MENU}
     { Write settings (MARIO.CFG) }
     Assign (FC, GetConfigName);
@@ -278,21 +345,18 @@ program Mario;
                    ST_LOAD,
                    ST_ERASE,
                    ST_OPTIONS,
-                   ST_NUMPLAYERS);
-      Menu: array[1..5] of string[40];
-      BG: array[0..MAX_PAGE, 1..5] of Word;
+                   ST_NUMPLAYERS,
+                   ST_KEYS);
+      Menu: array[1..7] of string[40];
+      BG: array[0..MAX_PAGE, 1..7] of Word;
       NumOptions: Integer;
+      WaitingForKey: Integer;
       Page: Byte;
 
     procedure Up;
     begin
       if Selected = 1 then
-      begin
-        if Status = ST_MENU then
-          Selected := NumOptions
-        else
-          MacroKey := kbEsc;
-      end
+        Selected := NumOptions
       else
         Dec (Selected);
     end;
@@ -300,12 +364,7 @@ program Mario;
     procedure Down;
     begin
       if Selected = NumOptions then
-      begin
-        if Status = ST_MENU then
-          Selected := 1
-        else
-          MacroKey := kbEsc;
-      end
+        Selected := 1
       else
         Inc (Selected);
     end;
@@ -316,6 +375,7 @@ program Mario;
     TestVGAMode := FALSE;
     GameNumber := -1;
     NextNumPlayers := Data.NumPlayers;
+    WaitingForKey := 0;
 
     repeat
       if TestVGAMode then
@@ -394,6 +454,8 @@ program Mario;
                  Menu[3] := 'END';
                  Menu[4] := '';
                  Menu[5] := '';
+                 Menu[6] := '';
+                 Menu[7] := '';
                  NumOptions := 3;
                  LastStatus := ST_MENU;
                end;
@@ -407,32 +469,50 @@ program Mario;
                    Menu[2] := 'STATUSLINE ON '
                  else
                    Menu[2] := 'STATUSLINE OFF';
-                 Menu[3] := '';
-                 Menu[4] := '';
+                 Menu[3] := 'CONTROLS';
+                 Menu[4] := 'BACK';
                  Menu[5] := '';
-                 NumOptions := 2;
+                 Menu[6] := '';
+                 Menu[7] := '';
+                 NumOptions := 4;
                  LastStatus := ST_MENU;
+              end;
+            ST_KEYS:
+              begin
+                 Menu[1] := 'JUMP   '#7' ' + GetKeyNameStr(Settings.KeyJump);
+                 Menu[2] := 'RUN    '#7' ' + GetKeyNameStr(Settings.KeyRun);
+                 Menu[3] := 'FIRE   '#7' ' + GetKeyNameStr(Settings.KeyFire);
+                 Menu[4] := 'PAUSE  '#7' ' + GetKeyNameStr(Settings.KeyPause);
+                 Menu[5] := 'SOUND  '#7' ' + GetKeyNameStr(Settings.KeySound);
+                 Menu[6] := 'STATUS '#7' ' + GetKeyNameStr(Settings.KeyStatus);
+                 Menu[7] := 'BACK';
+                 NumOptions := 7;
+                 LastStatus := ST_OPTIONS;
               end;
             ST_START:
               begin
                  Menu[1] := 'NO SAVE';
                  Menu[2] := 'GAME SELECT';
                  Menu[3] := 'ERASE';
-                 Menu[4] := '';
+                 Menu[4] := 'BACK';
                  Menu[5] := '';
-                 NumOptions := 3;
+                 Menu[6] := '';
+                 Menu[7] := '';
+                 NumOptions := 4;
                  LastStatus := ST_MENU;
                end;
             ST_NUMPLAYERS:
               begin
                  Menu[1] := 'ONE PLAYER';
                  Menu[2] := 'TWO PLAYERS';
-                 Menu[3] := '';
+                 Menu[3] := 'BACK';
                  Menu[4] := '';
                  Menu[5] := '';
+                 Menu[6] := '';
+                 Menu[7] := '';
                  if (Status <> OldStatus) then
                    Selected := Data.NumPlayers;
-                 NumOptions := 2;
+                 NumOptions := 3;
                  LastStatus := ST_START;
                end;
             ST_LOAD,
@@ -441,8 +521,9 @@ program Mario;
                  Menu[1] := 'GAME #1 '#7' ';
                  Menu[2] := 'GAME #2 '#7' ';
                  Menu[3] := 'GAME #3 '#7' ';
-                 Menu[4] := '';
                  Menu[5] := '';
+                 Menu[6] := '';
+                 Menu[7] := '';
                  for i := 1 to 3 do
                    with Saves.Games[i - 1] do
                      if (Progress[plMario] = 0) and (Progress[plLuigi] = 0) then
@@ -467,7 +548,8 @@ program Mario;
                        Menu[i] := Menu[i] +
                          Chr (NumPlayers + Ord ('0')) + 'P';
                      end;
-                 NumOptions := 3;
+                 Menu[4] := 'BACK';
+                 NumOptions := 4;
                  LastStatus := ST_START;
                end;
 
@@ -475,99 +557,166 @@ program Mario;
           end;
           wd := 0;
           xp := 0;
-          for i := 1 to 5 do
+          for i := 1 to 7 do
           begin
             j := TextWidth (Menu[i]);
             if j > wd then
-            begin
               wd := j;
-              xp := CenterX (Menu[i]) div 4 * 4;
-            end;
             ht := 8;
           end;
+          { Center the visual block (arrow + gap + text) on screen:
+            arrow at xp-12, text at xp+8, total = 20 + wd pixels }
+          xp := (SCREEN_WIDTH - 20 - wd) div 2 + 12;
           OldStatus := Status;
           Update := FALSE;
         end;
 
         MacroKey := #0;
-        case Key of
-          kbEsc:
-            if Status = ST_MENU then
+
+        { Key assignment mode: capture next keypress for binding }
+        if (Status = ST_KEYS) and (WaitingForKey > 0) then
+        begin
+          if Keyboard.LastKeyCode <> SDLK_UNKNOWN then
+          begin
+            { Reject non-remappable keys (needed for menu navigation) }
+            if (Keyboard.LastKeyCode <> SDLK_ESCAPE)
+              and (Keyboard.LastKeyCode <> SDLK_RETURN)
+              and (Keyboard.LastKeyCode <> SDLK_UP)
+              and (Keyboard.LastKeyCode <> SDLK_DOWN)
+              and (Keyboard.LastKeyCode <> SDLK_LEFT)
+              and (Keyboard.LastKeyCode <> SDLK_RIGHT) then
             begin
-              IntroDone := TRUE;
-              QuitGame := TRUE;
+              case WaitingForKey of
+                1: Settings.KeyJump   := LongInt(Keyboard.LastKeyCode);
+                2: Settings.KeyRun    := LongInt(Keyboard.LastKeyCode);
+                3: Settings.KeyFire   := LongInt(Keyboard.LastKeyCode);
+                4: Settings.KeyPause  := LongInt(Keyboard.LastKeyCode);
+                5: Settings.KeySound  := LongInt(Keyboard.LastKeyCode);
+                6: Settings.KeyStatus := LongInt(Keyboard.LastKeyCode);
+              end;
+              ApplyKeyBindings;
+              WaitingForKey := 0;
             end
-            else
-              Status := LastStatus;
-          kbUpArrow:
-            Up;
-          kbDownArrow:
-            Down;
-          kbSP,
-          kbEnter:
-            case Status of
+            else if Keyboard.LastKeyCode = SDLK_ESCAPE then
+              WaitingForKey := 0;  { Cancel assignment }
+          end;
+          Key := #0;
+          Keyboard.LastKeyCode := SDLK_UNKNOWN;
+          Update := TRUE;
+        end
+        else
+        begin
+          { Normal menu key processing }
+          case Key of
+            kbEsc:
+              if Status = ST_MENU then
+              begin
+                IntroDone := TRUE;
+                QuitGame := TRUE;
+              end
+              else
+                Status := LastStatus;
+            kbUpArrow:
+              Up;
+            kbDownArrow:
+              Down;
+            kbSP,
+            kbEnter:
+              case Status of
 
-              ST_MENU:
-                case Selected of
-                  1: Status := ST_START;
-                  2: Status := ST_OPTIONS;
-                  3: begin
-                       IntroDone := TRUE;
-                       QuitGame := TRUE;
-                     end;
-                end;
+                ST_MENU:
+                  case Selected of
+                    1: Status := ST_START;
+                    2: Status := ST_OPTIONS;
+                    3: begin
+                         IntroDone := TRUE;
+                         QuitGame := TRUE;
+                       end;
+                  end;
 
-              ST_START:
-                case Selected of
-                  1: Status := ST_NUMPLAYERS;
-                  2: Status := ST_LOAD;
-                  3: Status := ST_ERASE;
-                end;
+                ST_START:
+                  case Selected of
+                    1: Status := ST_NUMPLAYERS;
+                    2: Status := ST_LOAD;
+                    3: Status := ST_ERASE;
+                    4: Status := LastStatus;
+                  end;
 
-              ST_OPTIONS:
-                case Selected of
-                  1: if BeeperSound then
-                       BeeperOff
-                     else
-                       BeeperOn;
-                  2: Play.Stat := not Play.Stat;
-                end;
+                ST_OPTIONS:
+                  case Selected of
+                    1: if BeeperSound then
+                         BeeperOff
+                       else
+                         BeeperOn;
+                    2: Play.Stat := not Play.Stat;
+                    3: begin
+                         Status := ST_KEYS;
+                         WaitingForKey := 0;
+                       end;
+                    4: Status := LastStatus;
+                  end;
 
-              ST_NUMPLAYERS:
-                case Selected of
-                  1: begin
-                       NextNumPlayers := 1;
-                       IntroDone := TRUE;
-                     end;
-                  2: begin
-                       NextNumPlayers := 2;
-                       IntroDone := TRUE;
-                     end;
-                end;
-
-              ST_LOAD:
-                begin
-                  GameNumber := Selected - 1;
-                  Saves.Games[GameNumber].NumPlayers := 1;
-                  with Saves.Games[GameNumber] do
-                    if (Progress[plMario] = 0) and (Progress[plLuigi] = 0) then
-                      Status := ST_NUMPLAYERS
-                    else
-                    begin
-                      IntroDone := TRUE;
-                      NextNumPlayers := Saves.Games[GameNumber].NumPlayers;
+                ST_KEYS:
+                  if Selected = 7 then
+                    Status := LastStatus
+                  else
+                  begin
+                    { Start waiting for key assignment }
+                    WaitingForKey := Selected;
+                    case WaitingForKey of
+                      1: Menu[1] := 'JUMP   '#7' ...';
+                      2: Menu[2] := 'RUN    '#7' ...';
+                      3: Menu[3] := 'FIRE   '#7' ...';
+                      4: Menu[4] := 'PAUSE  '#7' ...';
+                      5: Menu[5] := 'SOUND  '#7' ...';
+                      6: Menu[6] := 'STATUS '#7' ...';
                     end;
-                end;
+                    Keyboard.LastKeyCode := SDLK_UNKNOWN;
+                  end;
 
-              ST_ERASE:
-                begin
-                  NewData;
-                  Saves.Games[Selected - 1] := Data;
-                  Saves.Games[Selected - 1].NumPlayers := 1;
-                  GameNumber := -1;
-                end;
+                ST_NUMPLAYERS:
+                  case Selected of
+                    1: begin
+                         NextNumPlayers := 1;
+                         IntroDone := TRUE;
+                       end;
+                    2: begin
+                         NextNumPlayers := 2;
+                         IntroDone := TRUE;
+                       end;
+                    3: Status := LastStatus;
+                  end;
 
-            end;
+                ST_LOAD:
+                  if Selected = 4 then
+                    Status := LastStatus
+                  else
+                  begin
+                    GameNumber := Selected - 1;
+                    Saves.Games[GameNumber].NumPlayers := 1;
+                    with Saves.Games[GameNumber] do
+                      if (Progress[plMario] = 0) and (Progress[plLuigi] = 0) then
+                        Status := ST_NUMPLAYERS
+                      else
+                      begin
+                        IntroDone := TRUE;
+                        NextNumPlayers := Saves.Games[GameNumber].NumPlayers;
+                      end;
+                  end;
+
+                ST_ERASE:
+                  if Selected = 4 then
+                    Status := LastStatus
+                  else
+                  begin
+                    NewData;
+                    Saves.Games[Selected - 1] := Data;
+                    Saves.Games[Selected - 1].NumPlayers := 1;
+                    GameNumber := -1;
+                  end;
+
+              end;
+          end;
         end;
         if Key <> #0 then
         begin
@@ -576,13 +725,13 @@ program Mario;
           Update := TRUE;
         end;
 
-        for k := 1 to 5 do
+        for k := 1 to 7 do
         begin
           if BG[Page, k] <> 0 then
             PopBackGr (BG[Page, k]);
         end;
 
-        for k := 1 to 5 do
+        for k := 1 to 7 do
         begin
           if Menu[k] <> '' then
           begin
