@@ -68,6 +68,21 @@ program Mario;
     SettingsFile = file of SettingsData;
     SaveFile = file of SaveData;
 
+  const
+    HI_SCORE_COUNT = 5;
+
+  type
+    {$A2}
+    HiScoreEntry = record
+      Initials: array[1..3] of Char;  { 3-letter arcade initials }
+      Score: LongInt;                   { Player score }
+    end;  { 8 bytes per entry with padding }
+
+    HiScoreTable = record
+      Entries: array[1..HI_SCORE_COUNT] of HiScoreEntry;
+    end;  { 40 bytes total }
+    {$A+}
+
   var
     GameNumber: Integer;
 
@@ -77,6 +92,7 @@ program Mario;
     EndGame: Boolean;
     Settings: SettingsData;
     Saves: SaveData;
+    HiScores: HiScoreTable;
 
   {$I sprites\BLOCK000.inc}
 
@@ -227,6 +243,23 @@ program Mario;
     else
       S := 'MARIO.SAV';
     GetSaveName := S;
+  end;
+
+  function GetHiScoreName: string;
+    var
+      S: string;
+      Len: byte absolute S;
+  begin
+    S := ParamStr (0);
+    if Len >= 3 then
+    begin
+      S[Len - 2] := 'H';
+      S[Len - 1] := 'I';
+      S[Len - 0] := 'S';
+    end
+    else
+      S := 'MARIO.HIS';
+    GetHiScoreName := S;
   end;
 
   procedure ReadConfig;
@@ -397,6 +430,282 @@ program Mario;
   {$ENDIF}
   end;
 
+  { --- Hi-Score table --- }
+
+  procedure SetInitials(var E: HiScoreEntry; C1, C2, C3: Char);
+  begin
+    E.Initials[1] := C1;
+    E.Initials[2] := C2;
+    E.Initials[3] := C3;
+  end;
+
+  procedure InitDefaultHiScores;
+  begin
+    with HiScores do
+    begin
+      SetInitials(Entries[1], 'M', '&', 'L');  Entries[1].Score := 5000;
+      SetInitials(Entries[2], 'M', 'A', 'R');  Entries[2].Score := 4000;
+      SetInitials(Entries[3], 'L', 'U', 'I');  Entries[3].Score := 3000;
+      SetInitials(Entries[4], 'M', 'I', 'K');  Entries[4].Score := 2000;
+      SetInitials(Entries[5], 'A', 'A', 'A');  Entries[5].Score := 1000;
+    end;
+  end;
+
+  procedure ReadHiScores;
+  var
+    UF: File;
+    ReadBytes: LongInt;
+    Dummy: Integer;
+  begin
+    Dummy := IOResult;
+    Assign(UF, GetHiScoreName);
+    Reset(UF, 1);
+    if IOResult = 0 then
+    begin
+      BlockRead(UF, HiScores, SizeOf(HiScoreTable), ReadBytes);
+      Close(UF);
+      Dummy := IOResult;
+      if ReadBytes = SizeOf(HiScoreTable) then
+        Exit;
+    end;
+    InitDefaultHiScores;
+  end;
+
+  procedure WriteHiScores;
+  var
+    UF: File;
+    Dummy: Integer;
+  begin
+    Dummy := IOResult;
+    Assign(UF, GetHiScoreName);
+    ReWrite(UF, 1);
+    if IOResult = 0 then
+    begin
+      BlockWrite(UF, HiScores, SizeOf(HiScoreTable));
+      Close(UF);
+      Dummy := IOResult;
+    end;
+  end;
+
+  function IsHiScore(Score: LongInt): Boolean;
+  begin
+    IsHiScore := (Score > 0) and
+      (Score > HiScores.Entries[HI_SCORE_COUNT].Score);
+  end;
+
+  procedure InsertHiScore(var Entry: HiScoreEntry);
+  var
+    i, Pos: Integer;
+  begin
+    Pos := HI_SCORE_COUNT + 1;
+    for i := HI_SCORE_COUNT downto 1 do
+      if Entry.Score > HiScores.Entries[i].Score then
+        Pos := i;
+    if Pos > HI_SCORE_COUNT then Exit;
+    for i := HI_SCORE_COUNT downto Pos + 1 do
+      HiScores.Entries[i] := HiScores.Entries[i - 1];
+    HiScores.Entries[Pos] := Entry;
+  end;
+
+  procedure ShowHiScoreTable(AutoDismiss: Boolean);
+  var
+    i, j, P: Integer;
+    S, ScoreStr: string;
+    WaitCount: Integer;
+  begin
+    ClearPalette;
+    LockPal;
+    ClearVGAMem;
+    SetView(0, 0);
+    XView := 0;
+    YView := 0;
+
+    for P := 0 to MAX_PAGE do
+    begin
+      OutPalette($0F, 63, 63, 63);
+      OutPalette($0E, 63, 60, 0);
+      OutPalette($0C, 30, 30, 30);
+
+      SetFont(1, Bold + Shadow);
+      CenterText(15, 'HI-SCORES', $0E);
+
+      SetFont(0, Bold + Shadow);
+      for i := 1 to HI_SCORE_COUNT do
+      begin
+        Str(HiScores.Entries[i].Score:11, ScoreStr);
+        for j := 4 to Length(ScoreStr) do
+          if ScoreStr[j] = ' ' then ScoreStr[j] := '0';
+        S := Chr(Ord('0') + i) + '. ' +
+             HiScores.Entries[i].Initials[1] +
+             HiScores.Entries[i].Initials[2] +
+             HiScores.Entries[i].Initials[3] +
+             '  ' + ScoreStr;
+        CenterText(40 + i * 18, S, $0F);
+      end;
+
+      if not AutoDismiss then
+      begin
+        SetFont(0, Shadow);
+        CenterText(160, 'PRESS ANY KEY', $0C);
+      end;
+
+      ShowPage;
+    end;
+
+    NewPalette(P256^);
+    UnLockPal;
+    Palettes.ReadPalette(Palette);
+    FadeUp(64);
+
+    Key := #0;
+
+    if AutoDismiss then
+    begin
+      for WaitCount := 1 to 200 do
+      begin
+        PollKeyboard;
+        WaitRetrace;
+        if Key <> #0 then Break;
+      end;
+    end
+    else
+    begin
+      repeat
+        PollKeyboard;
+        WaitRetrace;
+      until Key <> #0;
+    end;
+
+    Key := #0;
+    FadeDown(64);
+    ClearPalette;
+    ClearVGAMem;
+  end;
+
+  procedure EnterHiScoreInitials(PlayerScore: LongInt; PlayerIdx: Byte);
+  var
+    Initials: array[1..3] of Char;
+    CurPos: Integer;
+    Done: Boolean;
+    i, P: Integer;
+    ScoreStr: string;
+    NewEntry: HiScoreEntry;
+    LetterX: Integer;
+  begin
+    Initials[1] := 'A';
+    Initials[2] := 'A';
+    Initials[3] := 'A';
+    CurPos := 1;
+    Done := FALSE;
+
+    ClearPalette;
+    LockPal;
+    ClearVGAMem;
+    SetView(0, 0);
+    XView := 0;
+    YView := 0;
+
+    NewPalette(P256^);
+    UnLockPal;
+    Palettes.ReadPalette(Palette);
+
+    Key := #0;
+
+    repeat
+      for P := 0 to MAX_PAGE do
+      begin
+        Fill(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, 0);
+
+        OutPalette($0F, 63, 63, 63);
+        OutPalette($0E, 63, 60, 0);
+        OutPalette($0D, 40, 40, 63);
+        OutPalette($0C, 30, 30, 30);
+
+        SetFont(1, Bold + Shadow);
+        CenterText(20, 'NEW HI-SCORE!', $0E);
+
+        SetFont(0, Bold + Shadow);
+
+        Str(PlayerScore:11, ScoreStr);
+        for i := 4 to Length(ScoreStr) do
+          if ScoreStr[i] = ' ' then ScoreStr[i] := '0';
+        CenterText(42, PlayerName[PlayerIdx] + ':' + ScoreStr, $0F);
+
+        CenterText(70, 'ENTER YOUR INITIALS', $0D);
+
+        { Draw the 3 initials centered: ~3 letters * 14px spacing = 42px }
+        LetterX := (SCREEN_WIDTH - 42) div 2;
+        for i := 1 to 3 do
+        begin
+          if i = CurPos then
+          begin
+            WriteText(LetterX + (i - 1) * 14, 90, Initials[i], $0E);
+            Fill(LetterX + (i - 1) * 14, 100, 8, 1, $0E);
+          end
+          else
+            WriteText(LetterX + (i - 1) * 14, 90, Initials[i], $0F);
+        end;
+
+        SetFont(0, Shadow);
+        CenterText(130, 'UP/DN LETTER  LT/RT MOVE  ENTER OK', $0C);
+
+        ShowPage;
+      end;
+
+      FadeUp(0);  { Ensure palette is visible (no-op after first frame) }
+
+      repeat
+        PollKeyboard;
+        WaitRetrace;
+      until Key <> #0;
+
+      case Key of
+        kbUpArrow:
+          begin
+            if Initials[CurPos] = 'Z' then
+              Initials[CurPos] := 'A'
+            else
+              Inc(Initials[CurPos]);
+          end;
+        kbDownArrow:
+          begin
+            if Initials[CurPos] = 'A' then
+              Initials[CurPos] := 'Z'
+            else
+              Dec(Initials[CurPos]);
+          end;
+        kbRightArrow:
+          if CurPos < 3 then Inc(CurPos);
+        kbLeftArrow:
+          if CurPos > 1 then Dec(CurPos);
+        kbEnter, kbSP:
+          begin
+            if CurPos < 3 then
+              Inc(CurPos)
+            else
+              Done := TRUE;
+          end;
+        kbEsc:
+          Done := TRUE;
+      end;
+
+      Key := #0;
+    until Done;
+
+    NewEntry.Initials[1] := Initials[1];
+    NewEntry.Initials[2] := Initials[2];
+    NewEntry.Initials[3] := Initials[3];
+    NewEntry.Score := PlayerScore;
+    InsertHiScore(NewEntry);
+    WriteHiScores;
+
+    FadeDown(64);
+    ClearPalette;
+    ClearVGAMem;
+
+    ShowHiScoreTable(TRUE);
+  end;
+
   procedure CalibrateJoystick;
   begin
     SDL_Delay (100);
@@ -534,7 +843,8 @@ program Mario;
                    ST_KEYS,
                    ST_SOUND,
                    ST_GAMEPAD,
-                   ST_DEMOS);
+                   ST_DEMOS,
+                   ST_HISCORES);
       Menu: array[1..7] of string[40];
       KeyVal: array[1..6] of string[14];   { Key name for ST_KEYS items }
       JSVal:  array[1..6] of string[14];   { Button name for ST_GAMEPAD items }
@@ -547,6 +857,7 @@ program Mario;
       DemoFiles: array[1..9] of string[12];
       DemoLevels: array[1..9] of Word;
       NumDemos: Integer;
+      ShowHiScoreFromMenu: Boolean;
 
     procedure Up;
     begin
@@ -611,6 +922,7 @@ program Mario;
       TestVGAMode := FALSE;
       IntroDone := FALSE;
       PlayUserDemo := FALSE;
+      ShowHiScoreFromMenu := FALSE;
       NewData;
 
       PlayWorld (#0, #0, Intro_0_Data, Options_0_Data, Options_0_Data,
@@ -681,12 +993,12 @@ program Mario;
               begin
                  Menu[1] := 'START';
                  Menu[2] := 'REPLAYS';
-                 Menu[3] := 'OPTIONS';
-                 Menu[4] := 'END';
-                 Menu[5] := '';
+                 Menu[3] := 'HI-SCORES';
+                 Menu[4] := 'OPTIONS';
+                 Menu[5] := 'END';
                  Menu[6] := '';
                  Menu[7] := '';
-                 NumOptions := 4;
+                 NumOptions := 5;
                  LastStatus := ST_MENU;
                end;
             ST_OPTIONS:
@@ -981,8 +1293,9 @@ program Mario;
                   case Selected of
                     1: Status := ST_START;
                     2: Status := ST_DEMOS;
-                    3: Status := ST_OPTIONS;
-                    4: begin
+                    3: ShowHiScoreFromMenu := TRUE;
+                    4: Status := ST_OPTIONS;
+                    5: begin
                          IntroDone := TRUE;
                          QuitGame := TRUE;
                        end;
@@ -1173,10 +1486,17 @@ program Mario;
         { Only count toward demo timeout on the main menu }
         if Status = ST_MENU then
           Inc (Counter);
-      until IntroDone or PlayUserDemo or (Counter = WAIT_BEFORE_DEMO);
+      until IntroDone or PlayUserDemo or ShowHiScoreFromMenu
+        or (Counter = WAIT_BEFORE_DEMO);
       FadeDown (64);
 
-      if not IntroDone then
+      if ShowHiScoreFromMenu then
+      begin
+        ShowHiScoreTable(FALSE);
+        ShowHiScoreFromMenu := FALSE;
+        { Outer loop continues, re-entering Intro screen }
+      end
+      else if not IntroDone then
       begin
         if PlayUserDemo and (Selected >= 1) and (Selected <= NumDemos) then
         begin
@@ -1235,6 +1555,7 @@ program Mario;
   begin
     ExitProc := OldExitProc;  { Restore previous exit proc }
     WriteConfig;
+    WriteHiScores;
     ShutdownBGMusic;
   end;
 
@@ -1243,6 +1564,7 @@ begin  { Mario }
   InitWorlds;
   Data.NumPlayers := 1;
   ReadConfig;
+  ReadHiScores;
   ReadCmdLine;
 
   jr := Settings.JSDat;
@@ -1342,6 +1664,16 @@ begin  { Mario }
       end;
     until EndGame or QuitGame or
       (Data.Lives [plMario] + Data.Lives [plLuigi] = 0);
+
+    { Hi-score check after Game Over (not on quit) }
+    if (not QuitGame) and
+       (Data.Lives[plMario] + Data.Lives[plLuigi] = 0) then
+    begin
+      if IsHiScore(Data.Score[plMario]) then
+        EnterHiScoreInitials(Data.Score[plMario], plMario);
+      if (Data.NumPlayers = 2) and IsHiScore(Data.Score[plLuigi]) then
+        EnterHiScoreInitials(Data.Score[plLuigi], plLuigi);
+    end;
 
     if GameNumber <> -1 then
       Saves.Games[GameNumber] := Data;
