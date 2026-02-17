@@ -459,8 +459,27 @@ implementation
         begin
           Dec(Sequence[KeyNr, SeqPos[KeyNr]]);
           if Sequence[KeyNr, SeqPos[KeyNr]] = 0 then
-            Inc(SeqPos[KeyNr]);
-          Check := (SeqPos[KeyNr] mod 2 = 1);
+          begin
+            { Counter reached 0. Before advancing to the next run,
+              check if the next run is also empty. If so, end playback
+              NOW instead of advancing — otherwise we'd briefly report
+              the wrong key state (e.g. "pressed" when no data exists),
+              causing phantom jumps on the last frame. }
+            if (SeqPos[KeyNr] + 1 >= MAX_SEQ_LEN) or
+               (Sequence[KeyNr, SeqPos[KeyNr] + 1] = 0) then
+            begin
+              Playing := FALSE;
+              PlaybackJustEnded := TRUE;
+              Check := FALSE;
+            end
+            else
+            begin
+              Inc(SeqPos[KeyNr]);
+              Check := (SeqPos[KeyNr] mod 2 = 1);
+            end;
+          end
+          else
+            Check := (SeqPos[KeyNr] mod 2 = 1);
         end;
       end;
     end;
