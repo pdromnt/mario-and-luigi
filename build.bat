@@ -47,6 +47,9 @@ echo.
 echo Compilation successful!
 echo.
 
+REM Clean up intermediate files from OUT (FPC's -FE puts everything there)
+del /Q OUT\*.o OUT\*.or OUT\*.ppu OUT\*.rst OUT\*.res 2>nul
+
 REM Copy SDL2 DLLs into OUT
 if exist SDL2.dll copy /Y SDL2.dll OUT\ >nul 2>&1
 if exist SDL2_mixer.dll copy /Y SDL2_mixer.dll OUT\ >nul 2>&1
