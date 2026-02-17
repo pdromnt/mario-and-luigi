@@ -125,65 +125,54 @@ jobs:
             rm -rf "$ICONDIR"
           fi
 
-          # Bundle SDL2 dylibs from Homebrew
-          BREW_LIB="$(brew --prefix)/lib"
+          # ── Bundle all dylibs (SDL2 + every transitive dependency) ──
+          FWDIR="$APP/Contents/Frameworks"
+          BREW_PREFIX="$(brew --prefix)"
+
+          # Seed with the two SDL2 libraries
           for lib in libSDL2 libSDL2_mixer; do
-            # Find the actual dylib (not symlink)
-            DYLIB=$(find "$BREW_LIB" -name "${lib}-*.dylib" -not -type l | head -1)
-            if [ -z "$DYLIB" ]; then
-              DYLIB=$(find "$BREW_LIB" -name "${lib}.dylib" | head -1)
-            fi
-            if [ -n "$DYLIB" ]; then
-              cp "$DYLIB" "$APP/Contents/Frameworks/"
-            fi
+            DYLIB=$(find "$BREW_PREFIX/lib" -maxdepth 1 -name "${lib}-*.dylib" -not -type l | head -1)
+            [ -z "$DYLIB" ] && DYLIB=$(find "$BREW_PREFIX/lib" -maxdepth 1 -name "${lib}.dylib" | head -1)
+            [ -n "$DYLIB" ] && cp "$DYLIB" "$FWDIR/"
           done
 
-          # Also copy transitive dependencies of SDL2_mixer (ogg, vorbis, etc.)
-          for fw in "$APP/Contents/Frameworks/"*.dylib; do
-            otool -L "$fw" 2>/dev/null | grep "$(brew --prefix)" | awk '{print $1}' | while read dep; do
-              BASENAME=$(basename "$dep")
-              if [ ! -f "$APP/Contents/Frameworks/$BASENAME" ]; then
-                cp "$dep" "$APP/Contents/Frameworks/" 2>/dev/null || true
-              fi
+          # Recursively copy transitive deps until no new ones are found
+          CHANGED=1
+          while [ "$CHANGED" -eq 1 ]; do
+            CHANGED=0
+            for fw in "$FWDIR/"*.dylib; do
+              for dep in $(otool -L "$fw" 2>/dev/null | awk '{print $1}' | grep "$BREW_PREFIX"); do
+                BASENAME=$(basename "$dep")
+                if [ ! -f "$FWDIR/$BASENAME" ]; then
+                  cp "$dep" "$FWDIR/" 2>/dev/null && CHANGED=1
+                fi
+              done
             done
           done
 
-          # Repeat once more for deeper transitive deps
-          for fw in "$APP/Contents/Frameworks/"*.dylib; do
-            otool -L "$fw" 2>/dev/null | grep "$(brew --prefix)" | awk '{print $1}' | while read dep; do
-              BASENAME=$(basename "$dep")
-              if [ ! -f "$APP/Contents/Frameworks/$BASENAME" ]; then
-                cp "$dep" "$APP/Contents/Frameworks/" 2>/dev/null || true
-              fi
-            done
-          done
+          echo "Bundled dylibs:"
+          ls -1 "$FWDIR/"
 
-          # Rebase dylib paths to @executable_path/../Frameworks/
+          # ── Rebase all dylib paths ──
           BINARY="$APP/Contents/MacOS/mario"
 
-          # Fix the binary's references
-          for fw in "$APP/Contents/Frameworks/"*.dylib; do
-            BASENAME=$(basename "$fw")
-            # Find what the binary currently references
-            OLDPATH=$(otool -L "$BINARY" 2>/dev/null | grep "$BASENAME" | awk '{print $1}' | head -1)
-            if [ -n "$OLDPATH" ]; then
-              install_name_tool -change "$OLDPATH" "@executable_path/../Frameworks/$BASENAME" "$BINARY"
-            fi
-          done
-
-          # Fix inter-framework references
-          for fw in "$APP/Contents/Frameworks/"*.dylib; do
-            BASENAME=$(basename "$fw")
-            # Update the dylib's own ID
-            install_name_tool -id "@executable_path/../Frameworks/$BASENAME" "$fw" 2>/dev/null || true
-            # Fix references to other bundled dylibs
-            for other in "$APP/Contents/Frameworks/"*.dylib; do
-              OTHER_BASE=$(basename "$other")
-              OLDPATH=$(otool -L "$fw" 2>/dev/null | grep "$OTHER_BASE" | grep -v "@executable_path" | awk '{print $1}' | head -1)
-              if [ -n "$OLDPATH" ]; then
-                install_name_tool -change "$OLDPATH" "@executable_path/../Frameworks/$OTHER_BASE" "$fw" 2>/dev/null || true
-              fi
+          # Helper: rewrite every Homebrew reference in a Mach-O file
+          rebase_deps() {
+            local TARGET="$1"
+            for dep in $(otool -L "$TARGET" 2>/dev/null | awk '{print $1}' | grep "$BREW_PREFIX"); do
+              BASENAME=$(basename "$dep")
+              install_name_tool -change "$dep" "@executable_path/../Frameworks/$BASENAME" "$TARGET" 2>/dev/null || true
             done
+          }
+
+          # Fix the main binary
+          rebase_deps "$BINARY"
+
+          # Fix every bundled dylib (ID + references)
+          for fw in "$FWDIR/"*.dylib; do
+            BASENAME=$(basename "$fw")
+            install_name_tool -id "@executable_path/../Frameworks/$BASENAME" "$fw" 2>/dev/null || true
+            rebase_deps "$fw"
           done
 
           # Ad-hoc code sign (required for Apple Silicon)
