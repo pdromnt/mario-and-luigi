@@ -152,7 +152,6 @@ implementation
       SDLK_LEFT:      MapSDLKeyToScancode := 75;
       SDLK_RIGHT:     MapSDLKeyToScancode := 77;
       SDLK_DOWN:      MapSDLKeyToScancode := 80;
-      SDLK_DELETE:    MapSDLKeyToScancode := 83;
     else
       MapSDLKeyToScancode := 0;
     end;
