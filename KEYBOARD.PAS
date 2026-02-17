@@ -27,6 +27,7 @@ interface
     kbLeftArrow  = #75;
     kbRightArrow = #77;
     kbDownArrow  = #80;
+    kbF12        = #134;  { AT scancode $86 }
 
   var
     Key: Char;
@@ -164,6 +165,7 @@ implementation
       SDLK_LEFT:      MapSDLKeyToScancode := 75;
       SDLK_RIGHT:     MapSDLKeyToScancode := 77;
       SDLK_DOWN:      MapSDLKeyToScancode := 80;
+      SDLK_F12:       MapSDLKeyToScancode := 134;
     else
       MapSDLKeyToScancode := 0;
     end;
@@ -180,6 +182,7 @@ implementation
     begin
       case Event.type_ of
         SDL_KEYDOWN:
+          if Event.key.repeat_ = 0 then  { Ignore key repeats }
           begin
             KeyHit := True;
             sym := Event.key.keysym.sym;

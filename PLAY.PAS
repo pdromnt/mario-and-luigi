@@ -354,6 +354,226 @@ implementation
     end;
 
 
+    procedure DebugMenu;
+    { Overlay debug menu — draws on BOTH pages then waits for input.
+      Redraws on both pages when selection changes, restores on exit. }
+    const
+      NUM_DEBUG_ITEMS = 7;
+      MENU_X = 20;
+      MENU_Y = 42;
+      MENU_W = 280;
+      MENU_H = 118;
+    var
+      DebugBack0, DebugBack1: Integer;
+      Selected, TargetLevel: Integer;
+      Done, Redraw: Boolean;
+      Action: Integer;
+      MenuItems: array[1..NUM_DEBUG_ITEMS] of string[20];
+      n: string[2];
+
+      procedure DrawDebugOverlay;
+      var
+        di: Integer;
+        dl: Byte;
+        dy: Integer;
+        bx, by: Integer;
+      begin
+        { Use palette index $08 for border, $09 for dark fill }
+        OutPalette ($08, 25, 25, 30);  { Border: dark blue-gray }
+        OutPalette ($09, 5, 5, 10);    { Fill: very dark }
+
+        { Draw dark filled box }
+        bx := XView + MENU_X;
+        by := MENU_Y;
+        Fill (bx + 2, by, MENU_W - 4, MENU_H, $09);      { Main fill }
+        Fill (bx + 1, by + 1, 1, MENU_H - 2, $09);        { Left edge fill }
+        Fill (bx + MENU_W - 2, by + 1, 1, MENU_H - 2, $09); { Right edge fill }
+
+        { Draw border lines }
+        Fill (bx + 2, by, MENU_W - 4, 1, $08);             { Top }
+        Fill (bx + 2, by + MENU_H - 1, MENU_W - 4, 1, $08); { Bottom }
+        Fill (bx, by + 2, 1, MENU_H - 4, $08);             { Left }
+        Fill (bx + MENU_W - 1, by + 2, 1, MENU_H - 4, $08); { Right }
+        { Rounded corners: 1-pixel steps }
+        PutPixel (bx + 1, by + 1, $08);                    { TL }
+        PutPixel (bx + MENU_W - 2, by + 1, $08);           { TR }
+        PutPixel (bx + 1, by + MENU_H - 2, $08);           { BL }
+        PutPixel (bx + MENU_W - 2, by + MENU_H - 2, $08);  { BR }
+
+        SetFont (0, Bold + Shadow);
+        OutPalette ($0E, 63, 60, 0);
+        OutPalette ($0F, 63, 63, 63);
+        OutPalette ($07, 40, 40, 40);
+        CenterText (45, 'DEBUG', $0E);
+        for di := 1 to NUM_DEBUG_ITEMS do
+        begin
+          dy := 45 + 12 * di;
+          if di = Selected then
+          begin
+            WriteText (CenterX(MenuItems[di]) - 12, dy, #16, $0E);
+            dl := $0F;
+          end
+          else
+            dl := $07;
+          CenterText (dy, MenuItems[di], dl);
+        end;
+      end;
+
+    begin
+      PauseBGMusic;
+      PauseMusic;
+
+      Selected := 1;
+      TargetLevel := Ord(N2) - Ord('0');
+      if (TargetLevel < 1) or (TargetLevel > 6) then TargetLevel := 1;
+      Done := FALSE;
+      Action := 0;
+      Key := #0;
+
+      { Build menu items }
+      MenuItems[1] := 'TRIGGER GAME OVER';
+      MenuItems[2] := 'SKIP TO NEXT LEVEL';
+      Str(TargetLevel, n);
+      MenuItems[3] := 'SKIP TO LEVEL ' + n;
+      MenuItems[4] := 'BACK TO MAIN MENU';
+      MenuItems[5] := 'MAX LIVES';
+      MenuItems[6] := 'POWER UP';
+      MenuItems[7] := 'RESUME';
+
+      { Save background on BOTH pages, draw overlay on BOTH pages }
+      { Current page after last ShowPage in game loop has already swapped,
+        so we need to draw on current page and then swap+draw on the other. }
+      DebugBack0 := PushBackGr (XView + MENU_X, MENU_Y, MENU_W, MENU_H);
+      DrawDebugOverlay;
+      PresentFrame;
+
+      SwapPages;
+      DebugBack1 := PushBackGr (XView + MENU_X, MENU_Y, MENU_W, MENU_H);
+      DrawDebugOverlay;
+      PresentFrame;
+      SwapPages;  { Back to original page }
+
+      repeat
+        PollKeyboard;
+        WaitRetrace;  { Frame timing }
+
+        Redraw := FALSE;
+        case Key of
+          kbUpArrow:
+            begin
+              if Selected = 1 then Selected := NUM_DEBUG_ITEMS
+              else Dec(Selected);
+              Redraw := TRUE;
+            end;
+          kbDownArrow:
+            begin
+              if Selected = NUM_DEBUG_ITEMS then Selected := 1
+              else Inc(Selected);
+              Redraw := TRUE;
+            end;
+          kbLeftArrow:
+            if Selected = 3 then
+            begin
+              if TargetLevel > 1 then Dec(TargetLevel)
+              else TargetLevel := 6;
+              Redraw := TRUE;
+            end;
+          kbRightArrow:
+            if Selected = 3 then
+            begin
+              if TargetLevel < 6 then Inc(TargetLevel)
+              else TargetLevel := 1;
+              Redraw := TRUE;
+            end;
+          kbSP, kbEnter:
+            begin
+              Action := Selected;
+              Done := TRUE;
+            end;
+          kbEsc, kbF12:
+            begin
+              Action := 0;
+              Done := TRUE;
+            end;
+        end;
+        Key := #0;
+
+        if Redraw and not Done then
+        begin
+          { Update menu items if changed }
+          Str(TargetLevel, n);
+          MenuItems[3] := 'SKIP TO LEVEL ' + n;
+
+          { Restore then redraw on both pages }
+          if DebugBack0 <> 0 then
+            PopBackGr (DebugBack0);
+          DebugBack0 := PushBackGr (XView + MENU_X, MENU_Y, MENU_W, MENU_H);
+          DrawDebugOverlay;
+          PresentFrame;
+
+          SwapPages;
+          if DebugBack1 <> 0 then
+            PopBackGr (DebugBack1);
+          DebugBack1 := PushBackGr (XView + MENU_X, MENU_Y, MENU_W, MENU_H);
+          DrawDebugOverlay;
+          PresentFrame;
+          SwapPages;
+        end;
+      until Done;
+
+      { Restore backgrounds on both pages }
+      if DebugBack0 <> 0 then
+        PopBackGr (DebugBack0);
+      SwapPages;
+      if DebugBack1 <> 0 then
+        PopBackGr (DebugBack1);
+      SwapPages;
+
+      case Action of
+        1: begin  { Trigger Game Over — kill Mario properly }
+             Data.Lives[Player] := 1;
+             Data.Mode[Player] := mdSmall;
+             cdHit := 1;  { MovePlayer will start death demo }
+             StopBGMusic;
+           end;
+        2: begin  { Skip to Next Level }
+             PlayWorld := TRUE;
+             Passed := TRUE;
+             GameDone := TRUE;
+             StopBGMusic;
+           end;
+        3: begin  { Skip to Level N — subtract 2 because main loop will Inc }
+             Data.Progress[Player] := TargetLevel - 2;
+             PlayWorld := TRUE;
+             Passed := TRUE;
+             GameDone := TRUE;
+             StopBGMusic;
+           end;
+        4: begin  { Back to Main Menu }
+             QuitGame := TRUE;
+             StopBGMusic;
+           end;
+        5: begin  { Max Lives }
+             Data.Lives[Player] := 99;
+             ResumeBGMusic;
+           end;
+        6: begin  { Power Up }
+             case Data.Mode[Player] of
+               mdSmall: cdChamp := 1;
+               mdLarge: cdFlower := 1;
+               { mdFire: do nothing }
+             end;
+             ResumeBGMusic;
+           end;
+      else
+        begin  { Resume (Action = 0 or 7) }
+          ResumeBGMusic;
+        end;
+      end;
+      Key := #255;
+    end;
+
+
   begin  { PlayWorld }
     PlayWorld := False;
     Key := #0;
@@ -610,6 +830,9 @@ implementation
 
       if Key = #25 then  { P - pause }
         Pause;
+
+      if Key = kbF12 then  { F12 - debug menu }
+        DebugMenu;
 
       if ShowScore and (TextCounter = 120) and (LevelScore > 0) then
       begin

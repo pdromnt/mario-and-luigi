@@ -118,6 +118,23 @@ program Mario;
     Keyboard.BindStatus := Settings.KeyStatus;
   end;
 
+  procedure DebugLog(const Msg: string);
+  var
+    F: Text;
+    Dummy: Integer;
+  begin
+    Assign(F, 'debug.log');
+    Append(F);
+    if IOResult <> 0 then
+    begin
+      ReWrite(F);
+      if IOResult <> 0 then Exit;  { Can't open log at all }
+    end;
+    WriteLn(F, Msg);
+    Close(F);
+    Dummy := IOResult;  { Always consume IOResult so it never leaks }
+  end;
+
   function GetKeyNameStr(kc: LongInt): string;
   { Convert SDL keycode to uppercase display name, max 12 chars }
   var
@@ -126,6 +143,11 @@ program Mario;
     i: Integer;
   begin
     P := SDL_GetKeyName(kc);
+    if P = nil then
+    begin
+      GetKeyNameStr := '???';
+      Exit;
+    end;
     S := '';
     i := 0;
     while (P[i] <> #0) and (i < 12) do
@@ -184,20 +206,51 @@ program Mario;
     SettingsOK := FALSE;
     SavesOK := FALSE;
 
+    { Zero the settings record BEFORE reading to prevent stale data }
+    FillChar(Settings, SizeOf(Settings), 0);
+
   {$IFDEF MENU}
+    { Consume any stale IOResult }
+    i := IOResult;
+
     { Read settings (MARIO.CFG) }
     Assign (FC, GetConfigName);
     Reset (FC);
-    Read (FC, Settings);
-    Close (FC);
-    SettingsOK := IOResult = 0;
+    if IOResult = 0 then
+    begin
+      Read (FC, Settings);
+      if IOResult = 0 then
+      begin
+        Close (FC);
+        SettingsOK := IOResult = 0;
+      end
+      else
+      begin
+        Close (FC);
+        i := IOResult;
+      end;
+    end;
+
+    { Consume any stale IOResult before next file }
+    i := IOResult;
 
     { Read save games (MARIO.SAV) }
     Assign (FS, GetSaveName);
     Reset (FS);
-    Read (FS, Saves);
-    Close (FS);
-    SavesOK := IOResult = 0;
+    if IOResult = 0 then
+    begin
+      Read (FS, Saves);
+      if IOResult = 0 then
+      begin
+        Close (FS);
+        SavesOK := IOResult = 0;
+      end
+      else
+      begin
+        Close (FS);
+        i := IOResult;
+      end;
+    end;
   {$ENDIF}
 
     if not SettingsOK then
@@ -221,7 +274,7 @@ program Mario;
     if Settings.BGMVol = 0 then
     begin
       Settings.BGMOn := TRUE;
-      Settings.BGMVol := 10;
+      Settings.BGMVol := 5;
       Settings.SFXVol := 10;
     end;
 
@@ -250,6 +303,7 @@ program Mario;
     var
       FC: SettingsFile;
       FS: SaveFile;
+      Dummy: Integer;
   begin
     with Settings do
     begin
@@ -267,6 +321,9 @@ program Mario;
     Settings.KeySound  := LongInt(Keyboard.BindSound);
     Settings.KeyStatus := LongInt(Keyboard.BindStatus);
   {$IFDEF MENU}
+    { Consume any stale IOResult before file operations }
+    Dummy := IOResult;
+
     { Write settings (MARIO.CFG) }
     Assign (FC, GetConfigName);
     ReWrite (FC);
@@ -274,7 +331,11 @@ program Mario;
     begin
       Write (FC, Settings);
       Close (FC);
+      Dummy := IOResult;
     end;
+
+    { Consume any stale IOResult before next file }
+    Dummy := IOResult;
 
     { Write save games (MARIO.SAV) }
     Assign (FS, GetSaveName);
@@ -283,6 +344,7 @@ program Mario;
     begin
       Write (FS, Saves);
       Close (FS);
+      Dummy := IOResult;
     end;
   {$ENDIF}
   end;
@@ -506,12 +568,16 @@ program Mario;
                  Menu[5] := 'SOUND';
                  Menu[6] := 'STATUS';
                  Menu[7] := 'BACK';
-                 KeyVal[1] := GetKeyNameStr(Settings.KeyJump);
-                 KeyVal[2] := GetKeyNameStr(Settings.KeyRun);
-                 KeyVal[3] := GetKeyNameStr(Settings.KeyFire);
-                 KeyVal[4] := GetKeyNameStr(Settings.KeyPause);
-                 KeyVal[5] := GetKeyNameStr(Settings.KeySound);
-                 KeyVal[6] := GetKeyNameStr(Settings.KeyStatus);
+                 { Only rebuild key names when NOT waiting for input }
+                 if WaitingForKey = 0 then
+                 begin
+                   KeyVal[1] := GetKeyNameStr(Settings.KeyJump);
+                   KeyVal[2] := GetKeyNameStr(Settings.KeyRun);
+                   KeyVal[3] := GetKeyNameStr(Settings.KeyFire);
+                   KeyVal[4] := GetKeyNameStr(Settings.KeyPause);
+                   KeyVal[5] := GetKeyNameStr(Settings.KeySound);
+                   KeyVal[6] := GetKeyNameStr(Settings.KeyStatus);
+                 end;
                  NumOptions := 7;
                  LastStatus := ST_OPTIONS;
               end;
@@ -847,7 +913,18 @@ program Mario;
             WriteText (i + 8, j, Menu[k], l);
             { ST_KEYS items 1-6: draw dot + key name at fixed column }
             if (Status = ST_KEYS) and (k <= 6) then
-              WriteText (i + 64, j, #7' ' + KeyVal[k], l);
+            begin
+              if (WaitingForKey = k) then
+              begin
+                { Blink "..." while waiting for key input }
+                if (SDL_GetTicks div 300) mod 2 = 0 then
+                  WriteText (i + 64, j, #7' ...         ', l)
+                else
+                  WriteText (i + 64, j, #7'              ', l);
+              end
+              else
+                WriteText (i + 64, j, #7' ' + KeyVal[k], l);
+            end;
           end;
         end;
 
@@ -905,6 +982,16 @@ program Mario;
     ClearVGAMem;
   end;
 
+  var
+    OldExitProc: Pointer;
+
+  procedure CleanupOnExit; far;
+  begin
+    ExitProc := OldExitProc;  { Restore previous exit proc }
+    WriteConfig;
+    ShutdownBGMusic;
+  end;
+
 begin  { Mario }
   InitKeyBoard;
   InitWorlds;
@@ -922,6 +1009,10 @@ begin  { Mario }
 
   InitAudio;  { Open SDL audio device for PC speaker emulation }
   InitBGMusic;  { Open SDL2_mixer for background music }
+
+  { Install exit handler so settings are saved even on Halt(0) / window close }
+  OldExitProc := ExitProc;
+  ExitProc := @CleanupOnExit;
 
 {$IFDEF MENU}
   repeat
