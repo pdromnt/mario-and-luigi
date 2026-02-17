@@ -47,7 +47,7 @@ implementation
       dir := Copy(dir, 1, i)
     else
       dir := '';
-    GetMusicPath := dir + 'music\' + filename;
+    GetMusicPath := dir + 'music/' + filename;
   end;
 
   procedure ApplyBGMVolume;

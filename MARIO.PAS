@@ -4,8 +4,10 @@ program Mario;
   { SDL2 port }
 
   {$A+} {$B-} {$G+} {$I-} {$R-} {$S+} {$V-} {$X+}
+  {$IFDEF WINDOWS}
   {$APPTYPE GUI}
   {$R mario.res}
+  {$ENDIF}
 
   {$DEFINE MENU}
 
