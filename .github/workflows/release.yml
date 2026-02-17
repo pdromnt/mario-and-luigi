@@ -2,7 +2,7 @@ name: Build & Release
 
 on:
   push:
-    tags: ['v*']
+    tags: ['v*', '[0-9]*']
 
 permissions:
   contents: write
@@ -41,10 +41,13 @@ jobs:
       - name: Package
         shell: bash
         run: |
-          mkdir -p staging/music
+          mkdir -p staging
           cp MARIO.exe staging/
           cp SDL2.dll SDL2_mixer.dll staging/
-          cp music/*.ogg staging/music/
+          if ls music/*.ogg 1>/dev/null 2>&1; then
+            mkdir -p staging/music
+            cp music/*.ogg staging/music/
+          fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -81,8 +84,8 @@ jobs:
           # Copy binary
           cp mario "$APP/Contents/MacOS/mario"
 
-          # Copy music into Resources
-          cp music/*.ogg "$APP/Contents/Resources/music/"
+          # Copy music into Resources (if present)
+          cp music/*.ogg "$APP/Contents/Resources/music/" 2>/dev/null || true
 
           # Symlink music into MacOS/ so GetMusicPath (relative to binary) finds it
           ln -s ../Resources/music "$APP/Contents/MacOS/music"
@@ -219,9 +222,12 @@ jobs:
 
       - name: Package
         run: |
-          mkdir -p staging/music
+          mkdir -p staging
           cp mario staging/
-          cp music/*.ogg staging/music/
+          if ls music/*.ogg 1>/dev/null 2>&1; then
+            mkdir -p staging/music
+            cp music/*.ogg staging/music/
+          fi
           cat > staging/README.txt << 'EOF'
           Mario & Luigi — SDL2 Port (Linux x86_64)
           ==========================================
@@ -262,9 +268,12 @@ jobs:
 
       - name: Package
         run: |
-          mkdir -p staging/music
+          mkdir -p staging
           cp mario staging/
-          cp music/*.ogg staging/music/
+          if ls music/*.ogg 1>/dev/null 2>&1; then
+            mkdir -p staging/music
+            cp music/*.ogg staging/music/
+          fi
           cat > staging/README.txt << 'EOF'
           Mario & Luigi — SDL2 Port (Linux ARM64)
           ==========================================
