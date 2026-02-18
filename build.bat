@@ -1,13 +1,13 @@
 @echo off
-REM Build Mario & Luigi SDL2 port with Free Pascal
+REM Build Mario & Luigi SDL2 port with Free Pascal (64-bit)
 REM Output goes into OUT\ folder — ready to distribute or run.
 
 set FPC_DIR=C:\FPC\3.2.2\bin\i386-Win32
-set FPC=%FPC_DIR%\ppc386.exe
+set FPC=%FPC_DIR%\ppcrossx64.exe
 if not exist "%FPC%" (
-    set FPC=ppc386
+    set FPC=ppcrossx64
     set WINDRES=windres
-    echo Using ppc386 from PATH...
+    echo Using ppcrossx64 from PATH...
 ) else (
     set WINDRES=%FPC_DIR%\windres.exe
     echo Using %FPC%

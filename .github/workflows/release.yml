@@ -10,25 +10,25 @@ permissions:
 jobs:
 
   # ─────────────────────────────────────────────
-  #  Windows x86 (32-bit)
+  #  Windows x64 (64-bit)
   # ─────────────────────────────────────────────
   build-windows:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Free Pascal (i386)
+      - name: Install Free Pascal (x86_64)
         shell: bash
         run: |
           curl -L -o fpc.zip \
-            "https://github.com/castle-engine/castle-fpc/releases/download/snapshot/fpc-win32-i386.zip"
+            "https://github.com/castle-engine/castle-fpc/releases/download/snapshot/fpc-win64-x86_64.zip"
           7z x fpc.zip -oC:\\
           echo "C:\\fpc\\bin" >> "$GITHUB_PATH"
 
       - name: Compile
         shell: cmd
         run: |
-          ppc386 -Mtp -Ci- -Cr- -Sg -Si -O2 -FuC:\fpc\units\i386-win32\* -FuSDL2-for-Pascal -Fu. -FE. MARIO.PAS
+          ppcx64 -Mtp -Ci- -Cr- -Sg -Si -O2 -FuC:\fpc\units\x86_64-win64\* -FuSDL2-for-Pascal -Fu. -FE. MARIO.PAS
 
       - name: Package
         shell: bash
@@ -44,7 +44,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: windows-x86
+          name: windows-x64
           path: staging/
 
   # ─────────────────────────────────────────────
@@ -293,8 +293,8 @@ jobs:
           TAG="${GITHUB_REF_NAME}"
 
           # Windows zip
-          cd artifacts/windows-x86
-          zip -r "../../mario-luigi-${TAG}-windows-x86.zip" .
+          cd artifacts/windows-x64
+          zip -r "../../mario-luigi-${TAG}-windows-x64.zip" .
           cd ../..
 
           # macOS (already zipped with symlinks preserved)
