@@ -37,10 +37,12 @@ editor/OUT/
 # Editor dependencies (cloned from GitHub)
 editor/ImGui-Pascal/
 
-# ImGui layout state
+# ImGui / editor state files
 editor_layout.ini
+editor_window.ini
 
 # OS junk
 Thumbs.db
 Desktop.ini
 .DS_Store
+nul
