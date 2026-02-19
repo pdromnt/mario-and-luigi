@@ -14,7 +14,7 @@ You can play the original on the [Internet Archive's DOSBOX for browsers](https:
 
 ### Requirements
 
-- [Free Pascal Compiler 3.2.2+](https://www.freepascal.org/) (i386/Win32)
+- [Free Pascal Compiler 3.2.2+](https://www.freepascal.org/) (`ppcrossx64` for 64-bit builds)
 - [SDL2 development library](https://github.com/libsdl-org/SDL/releases) (`SDL2.dll`, included)
 - [SDL2-for-Pascal](https://github.com/PascalGameDevelopment/SDL2-for-Pascal) bindings (included in `SDL2-for-Pascal/`)
 
@@ -88,14 +88,16 @@ The original game used extensive x86 inline assembly and direct hardware access.
 
 ## Running
 
-All game assets (sprites, levels, fonts, palettes) are compiled directly into the executable as typed constants. To run the game standalone you only need two files:
+All game assets (sprites, levels, fonts, palettes) are compiled directly into the executable as typed constants. To run the game you need:
 
-| File        | Description                          |
-|-------------|--------------------------------------|
-| `MARIO.exe` | Game executable (all data embedded)  |
-| `SDL2.dll`  | SDL2 runtime library                 |
+| File              | Description                                       |
+|-------------------|---------------------------------------------------|
+| `MARIO.exe`       | Game executable (all data embedded)               |
+| `SDL2.dll`        | SDL2 runtime library                              |
+| `SDL2_mixer.dll`  | SDL2 Mixer library (for background music, optional) |
+| `music/*.ogg`     | Background music tracks (optional)                |
 
-Place both files in the same folder and run `MARIO.exe`.
+Place all files in the same folder and run `MARIO.exe`. The game works without `SDL2_mixer.dll` and `music/` — you'll just get the original PC speaker sound effects instead of background music.
 
 ## Controls
 
@@ -103,23 +105,82 @@ Place both files in the same folder and run `MARIO.exe`.
 | Key             | Action              |
 |-----------------|----------------------|
 | Up / Down       | Navigate menu        |
-| Enter           | Select               |
+| Enter / Space   | Select               |
+| Left / Right    | Change option value  |
 | Escape          | Back / Quit          |
 
-### Gameplay
+### Gameplay (defaults)
 | Key             | Action              |
 |-----------------|----------------------|
 | Left / Right    | Move                 |
-| Alt             | Jump                 |
-| Ctrl / Space    | Run / Fire (fire mode) |
+| X               | Jump                 |
+| Z               | Run                  |
+| C               | Fire (when in fire mode) |
 | Down            | Duck / Enter pipe    |
 | Up              | Look up / Enter pipe |
-| P               | Pause                |
+| Enter           | Pause                |
 | S               | Toggle status bar    |
 | Q               | Toggle sound on/off  |
-| Escape          | Quit                 |
+| F12             | Debug menu           |
+| Escape          | Quit to main menu    |
 
-Joystick is also supported.
+All six action keys (Jump, Run, Fire, Pause, Sound, Status) can be rebound in the **Options** menu. Joystick is also supported.
+
+## Cheats
+
+While paused, press **Tab** to enter cheat code mode, then type one of the following codes:
+
+### Power-Ups & Lives
+| Code   | Effect                     |
+|--------|----------------------------|
+| `03E8` | Extra life (+1)            |
+| `B172` | 10,000 lives               |
+| `9C32` | Star power (invincibility) |
+| `F1F2` | Super Mushroom (grow big)  |
+| `FFB5` | Fire Flower                |
+| `1UP`  | Spawn 1-Up mushroom        |
+
+### Gameplay
+| Code   | Effect                           |
+|--------|----------------------------------|
+| `2305` | Skip to next level               |
+| `D235` | Toggle turbo mode (double speed) |
+
+### Visual Modes
+| Code      | Effect                          |
+|-----------|---------------------------------|
+| `MONO`    | Black & white mode              |
+| `EGAMODE` | Retro EGA color palette         |
+| `VGAMODE` | Restore normal VGA palette      |
+| `COLOR`   | Restore normal VGA palette      |
+
+### Misc
+| Code      | Effect                         |
+|-----------|--------------------------------|
+| `TEST`    | Toggle retrace debug overlay   |
+| `0044`    | Toggle retrace debug overlay   |
+| `CREDITS` | Show programmer credit         |
+
+### Demo Recording (advanced)
+| Code   | Effect                          |
+|--------|---------------------------------|
+| `76DD` | Start recording demo input      |
+| `C7B4` | Play back recorded demo         |
+| `208D` | Save recorded demo to file      |
+
+## Debug Menu
+
+Press **F12** during gameplay to open the debug menu. Options:
+
+| Option              | Effect                                       |
+|---------------------|----------------------------------------------|
+| Trigger Game Over   | Immediately end the current game             |
+| Skip to Next Level  | Advance to the next level                    |
+| Skip to Level N     | Jump to a specific world (use Left/Right to pick 1-6) |
+| Back to Main Menu   | Return to the title screen                   |
+| Max Lives           | Set lives to 10,000                          |
+| Power Up            | Give fire flower power                       |
+| Resume              | Close debug menu and continue playing        |
 
 ## Levels
 
@@ -149,11 +210,12 @@ sdl2_port/
   WORLDS.PAS         World/level data management
   JOYSTICK.PAS       SDL2 joystick support
   CPU286.PAS         Stub (originally 286 detection)
-  build.bat          Build script
+  build.bat          Build script (Windows 64-bit)
   icon.ico           Application icon
   mario.rc           Windows resource script
   sprites/           170 auto-generated sprite include files
   data/              Level data, fonts, palettes, backgrounds
+  music/             Background music tracks (.ogg)
   SDL2-for-Pascal/   SDL2 Pascal bindings (MPL/zlib licensed)
 ```
 
