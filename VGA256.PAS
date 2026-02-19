@@ -951,7 +951,6 @@ implementation
     IsQuitRequested := QuitRequested;
   end;
 
-
   { ===== Unit Initialization ===== }
 
 var

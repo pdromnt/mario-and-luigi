@@ -189,7 +189,8 @@ implementation
         PauseBack: Integer;
         OldKey,
         Ch: Char;
-        EndPause: Boolean;
+        EndPause,
+        CheatDone: Boolean;
         PauseText,
         Cheat: String;
         P: StrPtr;
@@ -242,6 +243,7 @@ implementation
         if Key = kbTab then
         begin
           { Cheat code entry mode }
+          CheatDone := FALSE;
           repeat
             PollKeyboard;
             if Key <> OldKey then
@@ -362,9 +364,11 @@ implementation
                   PopBackGr (PauseBack);
                 PauseBack := PushBackGr (XView + 20, 85, 280, 10);
                 CenterText (85, PauseText, $0F);
+                PresentFrame;
+                CheatDone := TRUE;  { Stay paused but exit cheat entry }
               end;
             end;
-          until EndPause;
+          until EndPause or CheatDone;
         end;
         SDL_Delay(10);  { Don't spin the CPU while paused }
       until EndPause;
