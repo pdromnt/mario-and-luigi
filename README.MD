@@ -1,14 +1,14 @@
-# Mario & Luigi - SDL2 Port
+# Mario & Luigi - Improved SDL2 Port
 
 ![Mario & Luigi - Latest Build Screenshot](https://cdn.planetmagpie.net/mario.png)
 
-A faithful port of **Mario & Luigi** (1994) by Mike Wiering from DOS (Turbo Pascal + VGA Mode 13h) to modern Windows using **SDL2** and **Free Pascal**.
+A massive improvement and reimplementation of the SDL2 port of **Mario & Luigi** (1994) by Mike Wiering, original SDL2 port can be found on the main branch.
 
-The original game is a side-scrolling platformer for DOS featuring 6 worlds, two-player mode (Mario & Luigi), enemies, power-ups, pipes, and PC speaker sound effects. This port preserves all gameplay, visuals, and audio identically while replacing all DOS/hardware-specific code with SDL2 equivalents.  
+The original game is a side-scrolling platformer for DOS featuring 6 worlds, two-player mode (Mario & Luigi), enemies, power-ups, pipes, and PC speaker sound effects. This port preserves all gameplay, visuals, and audio identically while replacing all DOS/hardware-specific code with SDL2 equivalents and the improved version massive rewrittes a lot of the game with QoL changes and adds a bunch of new features.  
   
-This port was made based on the original [MARIOSRC.ZIP](https://wieringsoftware.nl/mario/MARIOSRC.ZIP) release, not based on the GitHub repo that was featured on Hacker News recently.  
+This was originally based on the original [MARIOSRC.ZIP](https://wieringsoftware.nl/mario/MARIOSRC.ZIP) release, not based on the GitHub repo that was featured on Hacker News recently.  
   
-You can play the original on the [Internet Archive's DOSBOX for browsers](https://archive.org/details/msdos_Mario_and_Luigi_2001).  
+You can play the original on the [Internet Archive's DOSBOX for browsers](https://archive.org/details/msdos_Mario_and_Luigi_2001) and the base SDL2 port can be found in the releases page listed as "Feature Parity".  
   
 ## Building
 
@@ -16,7 +16,8 @@ You can play the original on the [Internet Archive's DOSBOX for browsers](https:
 
 - [Free Pascal Compiler 3.2.2+](https://www.freepascal.org/) (`ppcrossx64` for 64-bit builds)
 - [SDL2 development library](https://github.com/libsdl-org/SDL/releases) (`SDL2.dll`, included)
-- [SDL2-for-Pascal](https://github.com/PascalGameDevelopment/SDL2-for-Pascal) bindings (included in `SDL2-for-Pascal/`)
+- [SDL2_mixer development library](https://github.com/libsdl-org/SDL_mixer/releases) (`SDL2.dll`, included)
+- [SDL2-for-Pascal](https://github.com/PascalGameDevelopment/SDL2-for-Pascal) bindings (`SDL2_mixer.dll`, included)
 
 ### Compile
 
