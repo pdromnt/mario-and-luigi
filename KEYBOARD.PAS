@@ -95,6 +95,11 @@ interface
     { Last raw SDL keycode pressed — for key assignment UI }
     LastKeyCode: LongInt;
 
+    { Set to True during gameplay (PlayWorld) so that BindPause/Sound/Status
+      overrides apply.  When False (menus), bound keys keep their natural
+      scancodes (e.g. Enter stays kbEnter for menu selection). }
+    InGameplay: Boolean;
+
 implementation
 
   uses
@@ -218,10 +223,15 @@ implementation
             if sc <> 0 then
               Key := Chr(sc);
 
-            { Configurable Pause/Sound/Status: inject scancodes so PLAY.PAS needs no changes }
-            if sym = BindPause  then Key := kbP;
-            if sym = BindSound  then Key := kbQ;
-            if sym = BindStatus then Key := kbS;
+            { Configurable Pause/Sound/Status: inject scancodes so PLAY.PAS needs no changes.
+              Only override during gameplay — in menus the natural scancode must be preserved
+              (e.g. Enter = kbEnter for menu selection, not kbP). }
+            if InGameplay then
+            begin
+              if sym = BindPause  then Key := kbP;
+              if sym = BindSound  then Key := kbQ;
+              if sym = BindStatus then Key := kbS;
+            end;
 
             { Non-remappable directional keys }
             if sym = SDLK_LEFT then   KeyMap[keyLeft] := True;
@@ -277,6 +287,7 @@ implementation
     BindSound  := LongInt(SDLK_q);
     BindStatus := LongInt(SDLK_s);
     LastKeyCode := LongInt(SDLK_UNKNOWN);
+    InGameplay := False;
   end;
 
   procedure KeyBoardDone;

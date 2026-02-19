@@ -93,6 +93,10 @@ interface
   procedure PresentFrame;
   function IsQuitRequested: Boolean;
 
+  { Editor support: read/write palette entry as 6-bit VGA values }
+  procedure GetPaletteEntry (Color: Byte; var R, G, B: Byte);
+  procedure SetPaletteEntry (Color, R, G, B: Byte);
+
   const
     InGraphicsMode: Boolean = FALSE;
 
@@ -731,6 +735,21 @@ implementation
   function GetPageOffset: Word;
   begin
     GetPageOffset := PageOffset;
+  end;
+
+
+  procedure GetPaletteEntry (Color: Byte; var R, G, B: Byte);
+  begin
+    R := PaletteR[Color];
+    G := PaletteG[Color];
+    B := PaletteB[Color];
+  end;
+
+  procedure SetPaletteEntry (Color, R, G, B: Byte);
+  begin
+    PaletteR[Color] := R;
+    PaletteG[Color] := G;
+    PaletteB[Color] := B;
   end;
 
 

@@ -222,138 +222,152 @@ implementation
         OutPalette ($0F, 63, 63, 63);
         SetFont (0, Bold + Shadow);
         CenterText (85, PauseText, $0F);
+        PresentFrame;  { Show the PAUSE text on screen }
       end;
 
       EndPause := FALSE;
       Cheat := '';
-      While Key = kbP do ;
-      While Chr (bKey - $80) = kbP do ;
-      OldKey := Key;
-      if Key = kbTab then
-      begin
-        repeat
-          if Key <> OldKey then
-          begin
-            Ch := GetAsciiCode (Key);
-            if Key < #$80 then
-            begin
-              Cheat := Cheat + Key;
-              EndPause := (Ch = #0);
-            end;
-            OldKey := Key;
+      { Clear Key so we wait for a fresh press, not the one that triggered pause }
+      Key := #0;
 
-            if (Cheat = kbT+kbE+kbS+kbT) or    { TEST }
-               (Cheat = kb0+kb0+kb4+kb4) then  { 0044 - ShowRetrace }
+      { Wait for pause key to be pressed again (or Tab for cheat codes) }
+      repeat
+        PollKeyboard;
+        OldKey := Key;
+        if Key = kbP then
+        begin
+          EndPause := TRUE;
+          Key := #0;
+        end;
+        if Key = kbTab then
+        begin
+          { Cheat code entry mode }
+          repeat
+            PollKeyboard;
+            if Key <> OldKey then
             begin
-              ShowRetrace := not ShowRetrace;
-              EndPause := TRUE;
-            end;
-            if Cheat = kb0+kb3+kbE+kb8 then   { 03E8 - AddLife }
-            begin
-              AddLife;
-              EndPause := TRUE;
-            end;
-            if Cheat = kbB+kb1+kb7+kb2 then   { B172 - 10000 Lives }
-            begin
-              Data.Lives[Player] := 10000;
-              EndPause := TRUE;
-            end;
-            if Cheat = kb9+kbC+kb3+kb2 then    { 9C32 - Star }
-            begin
-              cdStar := 1;
-              EndPause := TRUE;
-            end;
-            if Cheat = kbF+kb1+kbF+kb2 then    { F1F2 - Champ }
-            begin
-              cdChamp := 1;
-              EndPause := TRUE;
-            end;
-            if Cheat = kbF+kbF+kbB+kb5 then    { FFB5 - Flower }
-            begin
-              cdFlower := 1;
-              EndPause := TRUE;
-            end;
-            if Cheat = kbD+kb2+kb3+kb5 then   { D235 - Turbo mode }
-            begin
-              Turbo := not Turbo;
-              EndPause := TRUE;
-            end;
-            if Cheat = kb7+kb6+kbD+kbD then   { 76DD - Record demo }
-            begin
-              RecordMacro;
-              EndPause := TRUE;
-            end;
-            if Cheat = kbC+kb7+kbB+kb4 then   { C7B4 - Play demo }
-            begin
-              PlayMacro;
-              EndPause := TRUE;
-            end;
-            if Cheat = kb2+kb0+kb8+kbD then   { 208D - Save demo (file: $.) }
-            begin
-              SaveMacro;
-              EndPause := TRUE;
-            end;
-
-            if Cheat = kb1+kbU+kbP then   { 1UP }
-            begin
-            { AddLife; }
-              if CheatsUsed and 1 = 0 then
+              Ch := GetAsciiCode (Key);
+              if Key < #$80 then
               begin
-                NewEnemy (tpLife, 0, XView div W, -1, 2, 0, 2);
-                CheatsUsed := CheatsUsed or 1;
-              end
-              else
-              begin
-                NewEnemy (tpChamp, 1, (XView + Random (100)) div W,
-                  -1, 2 - Random (2), 0, 2);
-                if Random (10) = 0 then
-                  CheatsUsed := CheatsUsed and not 1;
+                Cheat := Cheat + Key;
+                EndPause := (Ch = #0);
               end;
-              EndPause := TRUE;
-            end;
-            if Cheat = kb2+kb3+kb0+kb5 then   { 2305 - next level }
-            begin
-              Passed := TRUE;
-              Waiting := TRUE;
-              TextCounter := 200;
-              PipeCode [1] := #$E7;
-              InPipe := TRUE;
-              EndPause := TRUE;
-            end;
-            if Cheat = kbM+kbO+kbN+kbO then  { MONO }
-            begin
-              PaletteEffect := peBlackWhite;
-              RefreshPalette (Palette);
-              EndPause := TRUE;
-            end;
-            if (Cheat = kbE+kbG+kbA+kbM+kbO+kbD+kbE) then  { EGAMODE }
-            begin
-              PaletteEffect := peEGAMode;
-              RefreshPalette (Palette);
-              EndPause := TRUE;
-            end;
-            if (Cheat = kbV+kbG+kbA+kbM+kbO+kbD+kbE) or  { VGAMODE }
-               (Cheat = kbC+kbO+kbL+kbO+kbR) then  { COLOR }
-            begin
-              PaletteEffect := peNoEffect;
-              RefreshPalette (Palette);
-              EndPause := TRUE;
-            end;
+              OldKey := Key;
 
-            if (Cheat = kbC+kbR+kbE+kbD+kbI+kbT+kbS) then
-            begin
-              P := @CREDIT;
-              Move (P^, PauseText, SizeOf (PauseText));
-              for i := 1 to CRED_LEN do
-                PauseText[i] := Chr ((Ord (PauseText[i]) - i) - $10 - (((i - 1) mod 8) shl 4));
-              if PauseBack <> 0 then
-                PopBackGr (PauseBack);
-              PauseBack := PushBackGr (XView + 20, 85, 280, 10);
-              CenterText (85, PauseText, $0F);
+              if (Cheat = kbT+kbE+kbS+kbT) or    { TEST }
+                 (Cheat = kb0+kb0+kb4+kb4) then  { 0044 - ShowRetrace }
+              begin
+                ShowRetrace := not ShowRetrace;
+                EndPause := TRUE;
+              end;
+              if Cheat = kb0+kb3+kbE+kb8 then   { 03E8 - AddLife }
+              begin
+                AddLife;
+                EndPause := TRUE;
+              end;
+              if Cheat = kbB+kb1+kb7+kb2 then   { B172 - 10000 Lives }
+              begin
+                Data.Lives[Player] := 10000;
+                EndPause := TRUE;
+              end;
+              if Cheat = kb9+kbC+kb3+kb2 then    { 9C32 - Star }
+              begin
+                cdStar := 1;
+                EndPause := TRUE;
+              end;
+              if Cheat = kbF+kb1+kbF+kb2 then    { F1F2 - Champ }
+              begin
+                cdChamp := 1;
+                EndPause := TRUE;
+              end;
+              if Cheat = kbF+kbF+kbB+kb5 then    { FFB5 - Flower }
+              begin
+                cdFlower := 1;
+                EndPause := TRUE;
+              end;
+              if Cheat = kbD+kb2+kb3+kb5 then   { D235 - Turbo mode }
+              begin
+                Turbo := not Turbo;
+                EndPause := TRUE;
+              end;
+              if Cheat = kb7+kb6+kbD+kbD then   { 76DD - Record demo }
+              begin
+                RecordMacro;
+                EndPause := TRUE;
+              end;
+              if Cheat = kbC+kb7+kbB+kb4 then   { C7B4 - Play demo }
+              begin
+                PlayMacro;
+                EndPause := TRUE;
+              end;
+              if Cheat = kb2+kb0+kb8+kbD then   { 208D - Save demo (file: $.) }
+              begin
+                SaveMacro;
+                EndPause := TRUE;
+              end;
+
+              if Cheat = kb1+kbU+kbP then   { 1UP }
+              begin
+              { AddLife; }
+                if CheatsUsed and 1 = 0 then
+                begin
+                  NewEnemy (tpLife, 0, XView div W, -1, 2, 0, 2);
+                  CheatsUsed := CheatsUsed or 1;
+                end
+                else
+                begin
+                  NewEnemy (tpChamp, 1, (XView + Random (100)) div W,
+                    -1, 2 - Random (2), 0, 2);
+                  if Random (10) = 0 then
+                    CheatsUsed := CheatsUsed and not 1;
+                end;
+                EndPause := TRUE;
+              end;
+              if Cheat = kb2+kb3+kb0+kb5 then   { 2305 - next level }
+              begin
+                Passed := TRUE;
+                Waiting := TRUE;
+                TextCounter := 200;
+                PipeCode [1] := #$E7;
+                InPipe := TRUE;
+                EndPause := TRUE;
+              end;
+              if Cheat = kbM+kbO+kbN+kbO then  { MONO }
+              begin
+                PaletteEffect := peBlackWhite;
+                RefreshPalette (Palette);
+                EndPause := TRUE;
+              end;
+              if (Cheat = kbE+kbG+kbA+kbM+kbO+kbD+kbE) then  { EGAMODE }
+              begin
+                PaletteEffect := peEGAMode;
+                RefreshPalette (Palette);
+                EndPause := TRUE;
+              end;
+              if (Cheat = kbV+kbG+kbA+kbM+kbO+kbD+kbE) or  { VGAMODE }
+                 (Cheat = kbC+kbO+kbL+kbO+kbR) then  { COLOR }
+              begin
+                PaletteEffect := peNoEffect;
+                RefreshPalette (Palette);
+                EndPause := TRUE;
+              end;
+
+              if (Cheat = kbC+kbR+kbE+kbD+kbI+kbT+kbS) then
+              begin
+                P := @CREDIT;
+                Move (P^, PauseText, SizeOf (PauseText));
+                for i := 1 to CRED_LEN do
+                  PauseText[i] := Chr ((Ord (PauseText[i]) - i) - $10 - (((i - 1) mod 8) shl 4));
+                if PauseBack <> 0 then
+                  PopBackGr (PauseBack);
+                PauseBack := PushBackGr (XView + 20, 85, 280, 10);
+                CenterText (85, PauseText, $0F);
+              end;
             end;
-          end;
-        until EndPause;
-      end;
+          until EndPause;
+        end;
+        SDL_Delay(10);  { Don't spin the CPU while paused }
+      until EndPause;
 
       if PauseBack <> 0 then
         PopBackGr (PauseBack);
@@ -417,7 +431,7 @@ implementation
         CenterText (45, 'DEBUG', $0E);
         for di := 1 to NUM_DEBUG_ITEMS do
         begin
-          dy := 45 + 12 * di;
+          dy := 49 + 12 * di;
           if di = Selected then
           begin
             WriteText (CenterX(MenuItems[di]) - 12, dy, #16, $0E);
@@ -432,6 +446,7 @@ implementation
     begin
       PauseBGMusic;
       PauseMusic;
+      InGameplay := False;  { Let Enter produce kbEnter, not kbP }
 
       Selected := 1;
       TargetLevel := Ord(N2) - Ord('0');
@@ -580,12 +595,14 @@ implementation
           ResumeBGMusic;
         end;
       end;
+      InGameplay := True;  { Restore gameplay key overrides }
       Key := #255;
     end;
 
 
   begin  { PlayWorld }
     PlayWorld := False;
+    InGameplay := True;
     Key := #0;
 
     SetYOffset (YBase);
@@ -743,7 +760,10 @@ implementation
     InitGrass;
 
     if OnlyDraw then
+    begin
+      InGameplay := False;
       Exit;
+    end;
 
     UnLockPal;
     FadeUp (64);
@@ -1098,6 +1118,7 @@ implementation
     ClearPalette;
     ClearVGAMem;
     StopMusic;
+    InGameplay := False;
   end;
 
 end.

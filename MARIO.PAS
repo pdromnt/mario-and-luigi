@@ -124,10 +124,10 @@ program Mario;
 
   procedure ApplyDefaultKeyBindings;
   begin
-    Settings.KeyJump  := LongInt(SDLK_LALT);
-    Settings.KeyRun   := LongInt(SDLK_LCTRL);
-    Settings.KeyFire  := LongInt(SDLK_SPACE);
-    Settings.KeyPause  := LongInt(SDLK_p);
+    Settings.KeyJump  := LongInt(SDLK_x);
+    Settings.KeyRun   := LongInt(SDLK_z);
+    Settings.KeyFire  := LongInt(SDLK_c);
+    Settings.KeyPause  := LongInt(SDLK_RETURN);
     Settings.KeySound  := LongInt(SDLK_q);
     Settings.KeyStatus := LongInt(SDLK_s);
   end;
@@ -213,55 +213,59 @@ program Mario;
     GetKeyNameStr := S;
   end;
 
-  function GetConfigName: string;
+  { Return the directory where user data files (config, saves, hi-scores) are stored.
+    On Windows: next to the executable (original behavior).
+    On macOS/Linux: ~/.mario-luigi/ (app bundles are read-only). }
+  function GetUserDataDir: string;
+  {$IFDEF UNIX}
+    var
+      Home: string;
+      D: string;
+      Dummy: Integer;
+  begin
+    Home := GetEnvironmentVariable('HOME');
+    if Home = '' then
+    begin
+      GetUserDataDir := '';
+      Exit;
+    end;
+    D := Home + '/.mario-luigi/';
+    { Create directory if it doesn't exist }
+    MkDir(D);
+    Dummy := IOResult;  { ignore error if already exists }
+    GetUserDataDir := D;
+  end;
+  {$ELSE}
     var
       S: string;
       Len: byte absolute S;
+      i: Integer;
   begin
-    S := ParamStr (0);
-    if Len >= 3 then
-    begin
-      S[Len - 2] := 'C';
-      S[Len - 1] := 'F';
-      S[Len - 0] := 'G';
-    end
+    S := ParamStr(0);
+    { Strip filename, keep directory path }
+    i := Len;
+    while (i > 0) and (S[i] <> '\') and (S[i] <> '/') do
+      Dec(i);
+    if i > 0 then
+      GetUserDataDir := Copy(S, 1, i)
     else
-      S := 'MARIO.CFG';
-    GetConfigName := S;
+      GetUserDataDir := '';
+  end;
+  {$ENDIF}
+
+  function GetConfigName: string;
+  begin
+    GetConfigName := GetUserDataDir + 'MARIO.CFG';
   end;
 
   function GetSaveName: string;
-    var
-      S: string;
-      Len: byte absolute S;
   begin
-    S := ParamStr (0);
-    if Len >= 3 then
-    begin
-      S[Len - 2] := 'S';
-      S[Len - 1] := 'A';
-      S[Len - 0] := 'V';
-    end
-    else
-      S := 'MARIO.SAV';
-    GetSaveName := S;
+    GetSaveName := GetUserDataDir + 'MARIO.SAV';
   end;
 
   function GetHiScoreName: string;
-    var
-      S: string;
-      Len: byte absolute S;
   begin
-    S := ParamStr (0);
-    if Len >= 3 then
-    begin
-      S[Len - 2] := 'H';
-      S[Len - 1] := 'I';
-      S[Len - 0] := 'S';
-    end
-    else
-      S := 'MARIO.HIS';
-    GetHiScoreName := S;
+    GetHiScoreName := GetUserDataDir + 'MARIO.HIS';
   end;
 
   procedure ReadConfig;
@@ -1206,9 +1210,11 @@ program Mario;
         begin
           if Keyboard.LastKeyCode <> SDLK_UNKNOWN then
           begin
-            { Reject non-remappable keys (needed for menu navigation) }
+            { Reject non-remappable keys (needed for menu navigation).
+              Enter is allowed for Pause/Sound/Status (indices 4-6)
+              because InGameplay flag prevents menu conflicts. }
             if (Keyboard.LastKeyCode <> SDLK_ESCAPE)
-              and (Keyboard.LastKeyCode <> SDLK_RETURN)
+              and ((Keyboard.LastKeyCode <> SDLK_RETURN) or (WaitingForKey >= 4))
               and (Keyboard.LastKeyCode <> SDLK_UP)
               and (Keyboard.LastKeyCode <> SDLK_DOWN)
               and (Keyboard.LastKeyCode <> SDLK_LEFT)

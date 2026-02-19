@@ -28,8 +28,15 @@
 *.log
 *.txt
 
-# Build output directory
+# Build output directories
 OUT/
+editor/OUT/
+
+# Editor dependencies (cloned from GitHub)
+editor/ImGui-Pascal/
+
+# ImGui layout state
+editor_layout.ini
 
 # OS junk
 Thumbs.db

@@ -40,6 +40,34 @@ interface
   procedure Redraw (X, Y: Integer);
   procedure BuildWorld;
 
+  { Returns a pointer to the sprite data for a given tile character.
+    Used by the editor to build the tile palette atlas.
+    Returns nil if no sprite exists for the character (e.g. enemies). }
+  function GetSpritePtr(TileChar: Char): Pointer;
+
+  { Ensure the Bricks[0..2] array is populated with themed sprites.
+    When WallType1 < 100 (BuildWall mode), Bricks are never filled by BuildWorld.
+    This forces them to be populated so the editor tile palette can display them. }
+  procedure EnsureBricks;
+
+  { Returns a pointer to the wall type sprite data (corner/top/body).
+    WallType: 0=Green, 1=Sand, 3=Brown, 4=Grass, 5=Desert (2=Custom uses ReColor2)
+    Variant: 0=corner, 1=top, 4=body
+    Returns nil if invalid. Used by editor for level-independent tile palette. }
+  function GetWallSpritePtr(WallType, Variant: LongInt): Pointer;
+
+  { Returns a pointer to the brick pattern sprite data.
+    BrickType: 0, 1, 2 (three visual patterns)
+    Returns nil if invalid. Used by editor for level-independent tile palette. }
+  function GetBrickSpritePtr(BrickType: LongInt): Pointer;
+
+  { Save/restore pristine copies of sprites modified in-place by
+    InitPipes (Pipe000-003) and BuildWorld (Block001, Wood000, XBlock000).
+    Call SaveSpriteBackups once before the first level load, then call
+    RestoreSpriteBackups before each subsequent level load. }
+  procedure SaveSpriteBackups;
+  procedure RestoreSpriteBackups;
+
 implementation
 
   { -- Sprite data includes (linear byte-per-pixel format) -- }
@@ -929,6 +957,166 @@ implementation
     Recolor (@Wood000, @Wood000, Options.WoodColor);
     Recolor (@XBlock000, @XBlock000, Options.XBlockColor);
 
+  end;
+
+  function GetSpritePtr(TileChar: Char): Pointer;
+  begin
+    case TileChar of
+      '?': GetSpritePtr := @Quest000;
+      '@': GetSpritePtr := @Quest001;
+      'I': GetSpritePtr := @Block000;
+      'J': GetSpritePtr := @Block001;
+      'K': GetSpritePtr := @Note000;
+      'X': GetSpritePtr := @XBlock000;
+      'W': GetSpritePtr := @Wood000;
+      '*': GetSpritePtr := @Coin000;
+      '=': GetSpritePtr := @Pin000;
+      '0': GetSpritePtr := @Pipe000;
+      '1': GetSpritePtr := @Pipe001;
+      '2': GetSpritePtr := @Pipe002;
+      '3': GetSpritePtr := @Pipe003;
+      #254: GetSpritePtr := @Exit000;
+      #255: GetSpritePtr := @Exit001;
+      #14: GetSpritePtr := @Grass1000;
+      #15: GetSpritePtr := @Grass2000;
+      #16: GetSpritePtr := @Grass3000;
+      { Decoration tiles — return first design variant }
+      'F': GetSpritePtr := @Fence000;
+      'f': GetSpritePtr := @Fence001;
+      'S': GetSpritePtr := @SmTree000;
+      's': GetSpritePtr := @SmTree001;
+      'P': GetSpritePtr := @WPalm000;
+      'a': GetSpritePtr := @Fall000;
+      'b': GetSpritePtr := @Fall001;
+      'T': GetSpritePtr := @Tree000;
+      't': GetSpritePtr := @Tree001;
+      'L': GetSpritePtr := @Lava000;
+      'l': GetSpritePtr := @Lava001;
+      'w': GetSpritePtr := @Window000;
+      'v': GetSpritePtr := @Window001;
+      { Palm tree sprites (Design 1) }
+      'p': GetSpritePtr := @Palm0000;  { palm trunk/leaf center }
+      'q': GetSpritePtr := @Palm1000;  { palm leaf left }
+      'r': GetSpritePtr := @Palm2000;  { palm leaf top }
+      'u': GetSpritePtr := @Palm3000;  { palm leaf right }
+    else
+      GetSpritePtr := nil;
+    end;
+  end;
+
+  procedure EnsureBricks;
+  begin
+    with Options do
+    begin
+      { Map WallType1 to brick sprite set and recolor into Bricks[0..2] }
+      case WallType1 of
+        100:
+          begin
+            Recolor (@Brick0000, @Bricks [0], GroundColor1);
+            Recolor (@Brick0001, @Bricks [1], GroundColor1);
+            Recolor (@Brick0002, @Bricks [2], GroundColor1);
+          end;
+        101:
+          begin
+            Recolor (@Brick1000, @Bricks [0], GroundColor1);
+            Recolor (@Brick1001, @Bricks [1], GroundColor1);
+            Recolor (@Brick1002, @Bricks [2], GroundColor1);
+          end;
+        102:
+          begin
+            Recolor (@Brick2000, @Bricks [0], GroundColor1);
+            Recolor (@Brick2001, @Bricks [1], GroundColor1);
+            Recolor (@Brick2002, @Bricks [2], GroundColor1);
+          end;
+      else
+        begin
+          { Default: use first brick set with current ground color }
+          Recolor (@Brick0000, @Bricks [0], GroundColor1);
+          Recolor (@Brick0001, @Bricks [1], GroundColor1);
+          Recolor (@Brick0002, @Bricks [2], GroundColor1);
+        end;
+      end;
+    end;
+  end;
+
+  function GetWallSpritePtr(WallType, Variant: LongInt): Pointer;
+  begin
+    GetWallSpritePtr := nil;
+    case WallType of
+      0: { Green }
+        case Variant of
+          0: GetWallSpritePtr := @Green000;  { corner }
+          1: GetWallSpritePtr := @Green001;  { top }
+          4: GetWallSpritePtr := @Green003;  { body }
+        end;
+      1: { Sand }
+        case Variant of
+          0: GetWallSpritePtr := @Sand000;
+          1: GetWallSpritePtr := @Sand001;
+          4: GetWallSpritePtr := @Sand003;
+        end;
+      3: { Brown }
+        case Variant of
+          0: GetWallSpritePtr := @Brown000;
+          1: GetWallSpritePtr := @Brown001;
+          4: GetWallSpritePtr := @Brown003;
+        end;
+      4: { Grass }
+        case Variant of
+          0: GetWallSpritePtr := @Grass000;
+          1: GetWallSpritePtr := @Grass001;
+          4: GetWallSpritePtr := @Grass003;
+        end;
+      5: { Desert }
+        case Variant of
+          0: GetWallSpritePtr := @Des000;
+          1: GetWallSpritePtr := @Des001;
+          4: GetWallSpritePtr := @Des003;
+        end;
+    end;
+  end;
+
+  function GetBrickSpritePtr(BrickType: LongInt): Pointer;
+  begin
+    GetBrickSpritePtr := nil;
+    case BrickType of
+      0: GetBrickSpritePtr := @Brick0000;
+      1: GetBrickSpritePtr := @Brick1000;
+      2: GetBrickSpritePtr := @Brick2000;
+    end;
+  end;
+
+  { --- Sprite backup/restore for editor level switching --- }
+
+  var
+    Bak_Pipe000, Bak_Pipe001, Bak_Pipe002, Bak_Pipe003: ImageBuffer;
+    Bak_Block001: ImageBuffer;
+    Bak_Wood000:  ImageBuffer;
+    Bak_XBlock000: ImageBuffer;
+    BakSaved: Boolean;
+
+  procedure SaveSpriteBackups;
+  begin
+    Move(Pipe000,   Bak_Pipe000,   SizeOf(ImageBuffer));
+    Move(Pipe001,   Bak_Pipe001,   SizeOf(ImageBuffer));
+    Move(Pipe002,   Bak_Pipe002,   SizeOf(ImageBuffer));
+    Move(Pipe003,   Bak_Pipe003,   SizeOf(ImageBuffer));
+    Move(Block001,  Bak_Block001,  SizeOf(ImageBuffer));
+    Move(Wood000,   Bak_Wood000,   SizeOf(ImageBuffer));
+    Move(XBlock000, Bak_XBlock000, SizeOf(ImageBuffer));
+    BakSaved := True;
+  end;
+
+  procedure RestoreSpriteBackups;
+  begin
+    if not BakSaved then Exit;
+    Move(Bak_Pipe000,   Pipe000,   SizeOf(ImageBuffer));
+    Move(Bak_Pipe001,   Pipe001,   SizeOf(ImageBuffer));
+    Move(Bak_Pipe002,   Pipe002,   SizeOf(ImageBuffer));
+    Move(Bak_Pipe003,   Pipe003,   SizeOf(ImageBuffer));
+    Move(Bak_Block001,  Block001,  SizeOf(ImageBuffer));
+    Move(Bak_Wood000,   Wood000,   SizeOf(ImageBuffer));
+    Move(Bak_XBlock000, XBlock000, SizeOf(ImageBuffer));
   end;
 
 end.

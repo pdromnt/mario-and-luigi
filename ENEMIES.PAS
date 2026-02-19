@@ -91,6 +91,11 @@ interface
   procedure StartEnemies (X: Integer; Dir: ShortInt);
   procedure HitAbove (MapX, MapY: Integer);
 
+  { Returns sprite data for an enemy tile character code.
+    SprW/SprH return the sprite's pixel dimensions.
+    Returns nil if the character is not an enemy. }
+  function GetEnemySpritePtr(TileChar: Char; var SprW, SprH: LongInt): Pointer;
+
 implementation
 
   {$I sprites\CHIBIBO000.inc} {$I sprites\CHIBIBO001.inc}
@@ -285,6 +290,26 @@ implementation
     for i := 0 to 1 do
       for j := kGreen to kRed do
         Mirror20x24 (KoopaList [Left, j, i], KoopaList [Right, j, i]);
+  end;
+
+  function GetEnemySpritePtr(TileChar: Char; var SprW, SprH: LongInt): Pointer;
+  begin
+    GetEnemySpritePtr := nil;
+    SprW := 20; SprH := 14;  { default for most enemies }
+    case TileChar of
+      #$80:       GetEnemySpritePtr := @Chibibo000;                                     { Goomba }
+      #$83:       GetEnemySpritePtr := @Chibibo002;                                     { Red Goomba }
+      #$81:       GetEnemySpritePtr := @Fish001;                                        { Fish }
+      #$82:       GetEnemySpritePtr := @F000;                                           { Fireball }
+      #$84, #$85: begin GetEnemySpritePtr := @PPlant002; SprW := 24; SprH := 20; end;  { Green Piranha }
+      #$86:       begin GetEnemySpritePtr := @PPlant000; SprW := 24; SprH := 20; end;  { Red Piranha }
+      #$87:       GetEnemySpritePtr := @Red000;                                         { Spiny }
+      #$88:       begin GetEnemySpritePtr := @GrKoopa000; SprH := 24; end;              { Green Koopa }
+      #$89:       begin GetEnemySpritePtr := @RdKoopa000; SprH := 24; end;              { Red Koopa }
+      #$8A:       begin GetEnemySpritePtr := @GrKoopa000; SprH := 24; end;              { Green Koopa (fast) }
+      #$B0:       GetEnemySpritePtr := @Lift1000;                                       { Block Lift }
+      #$B1:       GetEnemySpritePtr := @Donut000;                                       { Falling Platform }
+    end;
   end;
 
   procedure ClearEnemies;
