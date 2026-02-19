@@ -27,6 +27,9 @@ program Mario;
     Txt,
     Music,
     BGMusic,
+    {$IFDEF UNIX}
+    dos,
+    {$ENDIF}
     sdl2;
 
   const
@@ -223,7 +226,7 @@ program Mario;
       D: string;
       Dummy: Integer;
   begin
-    Home := GetEnvironmentVariable('HOME');
+    Home := GetEnv('HOME');
     if Home = '' then
     begin
       GetUserDataDir := '';
