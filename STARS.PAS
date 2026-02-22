@@ -36,7 +36,7 @@ implementation
     ClearStars;
     RandSeed := 0;
     for i := 0 to 319 do
-      StarMap [i] := ((Random (Options.Horizon) {+ WindowY}) * VIR_SCREEN_WIDTH + i);
+      StarMap [i] := ((Random (Options.Horizon) {+ WindowY}) * 320 + i);
     if Options.Stars in [1, 2] then
       for i := 0 to 319 do
         if Random (10) > 2 then StarMap [i] := 0;
@@ -54,99 +54,108 @@ implementation
 
   procedure ShowStars;
   var
-    i, X: Integer;
-    Pg: Integer;
-    StarY, StarX: Integer;
-    WX: Integer;
-    Addr: LongInt;
-    Pixel: Byte;
-    StarColor: Byte;
+    X: Integer;
+    P1,
+    P2: Pointer;
   begin
-    Pg := CurrentPage;
-    LastX [Pg] := XView;
+    LastX [CurrentPage] := XView;
     X := (8 * XView) div STAR_SPEED;
+    P1 := @StarMap [0];
+    P2 := @StarBackGr^ [CurrentPage, 0];
     BlinkCounter := Random (320);
+    asm
+          mov     bx, BlinkCounter
+          push    es
+          push    ds
+          lds     si, P1          { StarMap }
+          les     di, P2          { StarBackGr }
+          mov     cx, 320
+          cld
 
-    for i := 0 to 319 do
-    begin
-      if StarMap[i] = 0 then Continue;
+    @1:   push    cx
+          lodsw
+          or      ax, ax
+          jz      @2
 
-      { Decompose StarMap address into row and column, add scroll offset,
-        then wrap X coordinate to handle VGA CRTC circular buffer }
-      StarY := StarMap[i] div VIR_SCREEN_WIDTH;
-      StarX := StarMap[i] mod VIR_SCREEN_WIDTH;
-      WX := (StarX + X) mod VIR_SCREEN_WIDTH;
-      if WX < 0 then Inc(WX, VIR_SCREEN_WIDTH);
-      Addr := LongInt(StarY) * VIR_SCREEN_WIDTH + WX;
+          add     ax, X
+          push    es
+          push    di
+          mov     di, ax
+          mov     ax, 0A000h
+          mov     es, ax
+          seges   mov     dl, [di]
+          or      dl, dl
+          jz      @3
+          cmp     dl, 0F0h
+          jz      @6
+          cmp     dl, 0A0h
+          jae     @5
+    @6:   xor     dl, dl
+          jmp     @3
+    @5:   mov     al, C1
+          dec     bx
+          jnz     @4
+          mov     al, C2
+    @4:   stosb
+    @3:   pop     di
+          pop     es
+          mov     al, dl
+          stosb
 
-      { Read pixel from current page's framebuffer }
-      if (StarY >= 0) and (StarY < FB_HEIGHT) then
-      begin
-        Pixel := FrameBuffer[Pg, Addr];
+    @2:   pop     cx
+          dec     cx
+          jnz     @1
 
-        { Only draw star if pixel is sky color ($A0+) or $F0, otherwise skip }
-        if Pixel = 0 then
-        begin
-          StarBackGr^[Pg, i] := 0;
-          Continue;
-        end;
-
-        if (Pixel = $F0) or (Pixel >= $A0) then
-        begin
-          { Skip $F0 exactly - treat as non-star pixel }
-          if Pixel = $F0 then
-          begin
-            StarBackGr^[Pg, i] := 0;
-            Continue;
-          end;
-
-          { Pick star color - one random star blinks brighter }
-          Dec(BlinkCounter);
-          if BlinkCounter = 0 then
-            StarColor := C2
-          else
-            StarColor := C1;
-
-          { Save background and draw star }
-          StarBackGr^[Pg, i] := Pixel;
-          FrameBuffer[Pg, Addr] := StarColor;
-        end
-        else
-          StarBackGr^[Pg, i] := 0;
-      end
-      else
-        StarBackGr^[Pg, i] := 0;
+          pop     ds
+          pop     es
     end;
   end;
 
   procedure HideStars;
   var
-    i, X: Integer;
-    Pg: Integer;
-    StarY, StarX: Integer;
-    WX: Integer;
-    Addr: LongInt;
-    Saved: Byte;
+    X: Integer;
+    P1,
+    P2: Pointer;
   begin
-    Pg := CurrentPage;
-    X := (8 * LastX [Pg]) div STAR_SPEED;
+    X := (8 * LastX [CurrentPage]) div STAR_SPEED;
+    P1 := @StarMap [0];
+    P2 := @StarBackGr^ [CurrentPage, 0];
+    asm
+          push    es
+          push    ds
+          lds     si, P1          { StarMap }
+          les     di, P2          { StarBackGr }
+          mov     cx, 320
+          cld
 
-    for i := 0 to 319 do
-    begin
-      if StarMap[i] = 0 then Continue;
+    @1:   push    cx
+          lodsw
+          or      ax, ax
+          jz      @2
+          add     ax, X
+          mov     bx, ax
 
-      Saved := StarBackGr^[Pg, i];
-      if Saved = 0 then Continue;
+          seges   mov     al, [di]
+          inc     di
+          or      al, al
+          jz      @2
 
-      { Decompose and wrap X coordinate }
-      StarY := StarMap[i] div VIR_SCREEN_WIDTH;
-      StarX := StarMap[i] mod VIR_SCREEN_WIDTH;
-      WX := (StarX + X) mod VIR_SCREEN_WIDTH;
-      if WX < 0 then Inc(WX, VIR_SCREEN_WIDTH);
-      Addr := LongInt(StarY) * VIR_SCREEN_WIDTH + WX;
+          push    es
+          push    di
+          mov     di, bx
+          mov     bx, 0A000h
+          mov     es, bx
 
-      if (StarY >= 0) and (StarY < FB_HEIGHT) then
-        FrameBuffer[Pg, Addr] := Saved;
+          stosb
+          pop     di
+          pop     es
+
+    @2:   pop     cx
+          dec     cx
+          jnz     @1
+
+          pop     ds
+          pop     es
     end;
   end;
 

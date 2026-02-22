@@ -48,6 +48,7 @@ implementation
     Str (Data.Coins[Player]: 2, S);
     WriteText (XView + 158 + 40 + 10, HEIGHT, S, 31);
 
+  {  WriteText (XView + 242, HEIGHT, 'WORLD ' + WorldNumber, 31); }
     WriteText (XView + 258, HEIGHT, 'LEVEL ' + WorldNumber[3], 31);
 
     SetFont (0, 0);

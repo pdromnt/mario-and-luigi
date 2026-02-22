@@ -30,6 +30,7 @@ implementation
     DY,
     YPos,
     DelayCounter: Integer;
+  {  BumpFillAttr: Byte; }
 
 
 
@@ -53,6 +54,7 @@ implementation
     BumpY := Y;
     DY := -BumpHeight;
     GetImage (X, Y, W, H, BlockBuffer);
+  {  BumpFillAttr := GetPixel (X, Y + H - 1); }
     SaveBumpBackGr;
     Bumping := True;
     DelayCounter := 0;
@@ -74,6 +76,7 @@ implementation
         SaveBumpBackGr;
         Y := BumpY - BumpHeight + Abs (DY);
         PutImage (BumpX, Y, W, H, BlockBuffer);
+       { Fill (BumpX, Y + H, W, BumpHeight - Abs (DY), BumpFillAttr); }
         DrawBackGrBlock (BumpX, Y + H, W, BumpHeight - Abs (DY));
       end
       else

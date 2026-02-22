@@ -1,16 +1,10 @@
 unit BackGr;
 
-{ SDL2 port of background rendering unit }
-{ Original (C) Copyright 1994-2001, Mike Wiering }
-{ All VGA planar/Mode13h assembly replaced with linear FrameBuffer access }
-
-{$R-} { no range-checking }
-
 interface
 
   uses
     Buffers,
-    VGA256,
+    Vga256,
     Palettes;
 
   const
@@ -36,10 +30,15 @@ interface
 
 implementation
 
-  {$I data\palbrick.inc}
-  {$I data\palpill.inc}
+  {$I PALBRICK.$00}
+  {$I PALPILL.$00}
+  {$I PALPILL.$01}
+  {$I PALPILL.$02}
 
-  {$I data\backgrounds.inc}
+  {$I BOGEN.BK}
+  {$I BOGEN7.BK}
+  {$I BOGEN26.BK}
+  {$I MOUNT.BK}
 
   const
     Speed = 3;
@@ -60,7 +59,34 @@ implementation
 
 
   procedure InitClouds;
+  var
+    i, j, Tmp0, Tmp1: Integer;
   begin
+  {
+    RandSeed := 18;
+    for i := 1 to MaxClouds do
+      CloudMap [i, 0] := Random (W * (MaxWorldSize div CloudSpeed) - MaxCloudSize);
+    RandSeed := 2;
+    for i := 1 to MaxClouds do
+      CloudMap [i, 1] := Random (Options.Horizon - Height - CloudHeight);
+    for i := 1 to MaxClouds do
+      for j := i to MaxClouds do
+      if CloudMap [j, 0] < CloudMap [i, 0] then
+      begin
+        Tmp0 := CloudMap [i, 0];
+        Tmp1 := CloudMap [i, 1];
+        CloudMap [i] := CloudMap [j];
+        CloudMap [j, 0] := Tmp0;
+        CloudMap [j, 1] := Tmp1;
+      end;
+    RandSeed := 6;
+    for i := 1 to MaxClouds do
+    begin
+      CloudMap [i + MaxClouds, 0] := CloudMap [i, 0] + MinCloudSize +
+        Random (MaxCloudSize - MinCloudSize);
+      CloudMap [i + MaxClouds, 1] := CloudMap [i, 1];
+    end;
+  }
     CloudMap [1, 0] :=   50; CloudMap [1, 1] :=  58; CloudMap [MaxClouds + 1, 0] :=   92;
     CloudMap [2, 0] :=  180; CloudMap [2, 1] :=  20; CloudMap [MaxClouds + 2, 0] :=  228;
     CloudMap [3, 0] :=  430; CloudMap [3, 1] :=  40; CloudMap [MaxClouds + 3, 0] :=  484;
@@ -70,82 +96,101 @@ implementation
     CloudMap [7, 0] := 1200; CloudMap [7, 1] :=  20; CloudMap [MaxClouds + 7, 0] := 1240;
   end;
 
-
   procedure TraceCloud (X, Y, N: Integer; Dir, Attr, Ovr: Byte);
-  { Original used Mode 13h linear (320-byte rows) writing to segment $A000.
-    Converted to FrameBuffer[CurrentPage] with VIR_SCREEN_WIDTH row pitch.
-
-    Draws a cloud edge shape. The shape is defined by 19 rows of horizontal
-    delta offsets. For each of the 19 rows, N pixels are drawn horizontally.
-    The delta offsets are cumulative, shifting the drawing position left/right
-    to create the curved cloud edge.
-
-    A pixel is only overwritten if its current value matches Ovr, and it must
-    be within the horizontal clipping range [MinX..MaxX] which tracks XView
-    on the current scanline. Drawing stops early on a row if a non-matching
-    pixel is found after at least one successful match (creating clean edges). }
-  const
-    LeftDeltas: array[0..18] of Integer =
-      (9, -3, -2, -1, -1, -1, 0, -1, 0, 0, 0, 0, 1, 0, 1, 1, 1, 2, 3);
-    RightDeltas: array[0..18] of Integer =
-      (0, 3, 2, 1, 1, 1, 0, 1, 0, 0, 0, 0, -1, 0, -1, -1, -1, -2, -3);
   var
-    Row, Col: Integer;
-    MinX, MaxX: Integer;
-    CurX: Integer;
-    Pg: Integer;
-    Offs: LongInt;
-    WX: Integer;
-    Pix: Byte;
-    Ok: Boolean;
+    Min,
+    Max: Integer;
+    Ok: Byte;
   begin
-    if N = 0 then Exit;
-    Pg := CurrentPage;
+    asm
+          jmp     @Start
 
-    { The deltas are cumulative, starting from X }
-    CurX := X;
+    @PutList:     { SI = Offset, AH = Count }
+          mov     Ok, 0
+          push    ax
+          segcs   lodsw
+          add     di, ax
+          push    cx
+          push    di
+    @@0:  seges   mov     al, [di]
+          cmp     al, bl
+          jnz     @@1
+          cmp     di, Min
+          jb      @@2
+          cmp     di, Max
+          ja      @@2
+          seges   mov     [di], dl
+          mov     Ok, 1
+          jmp     @@1
+    @@2:  cmp     Ok, 1
+          jnz     @@1
+          jmp     @@3
+    @@1:  inc     di
+          dec     cx
+          jnz     @@0
+    @@3:  pop     di
+          add     di, 320
+          pop     cx
+          pop     ax
+          add     Min, 320
+          add     Max, 320
+          dec     ah
+          jnz     @PutList
+          retn
 
-    for Row := 0 to 18 do
-    begin
-      { Apply cumulative horizontal delta }
-      if Dir = Left then
-        CurX := CurX + LeftDeltas[Row]
-      else
-        CurX := CurX + RightDeltas[Row];
+    @Start:
+          push    es
+          mov     ax, VGA_SEGMENT
+          mov     es, ax
+          cld
+          mov     bx, 320
+          mov     ax, Y
+  {        add     ax, WindowY }
+          mul     bx
+          push    ax
+          add     ax, XView
+          mov     Min, ax
+          mov     Max, ax
+          pop     ax
+          add     Max, 320 - 1
+          add     ax, X
+          mov     di, ax
+          mov     dl, Attr
 
-      { Clipping: Min/Max advance by one row each iteration (in the original
-        they advanced by 320 bytes = one scanline). Here we just track the
-        Y coordinate and use XView for horizontal clipping. }
-      MinX := XView;
-      MaxX := XView + SCREEN_WIDTH - 1;
+          cmp     Dir, Right
+          jz      @Right
+    @Left:
+          call    @GetLeftList
 
-      Ok := False;
-      if (Y + Row >= 0) and (Y + Row < FB_HEIGHT) then
-      begin
-        for Col := 0 to N - 1 do
-        begin
-          WX := (CurX + Col) mod VIR_SCREEN_WIDTH;
-          if WX < 0 then Inc(WX, VIR_SCREEN_WIDTH);
-          Offs := LongInt(Y + Row) * VIR_SCREEN_WIDTH + WX;
-          Pix := FrameBuffer[Pg, Offs];
-          if Pix = Ovr then
-          begin
-            if (CurX + Col >= MinX) and (CurX + Col <= MaxX) then
-            begin
-              FrameBuffer[Pg, Offs] := Attr;
-              Ok := True;
-            end
-            else
-            begin
-              { Outside clipping range after having drawn: stop this row }
-              if Ok then Break;
-            end;
-          end;
-        end;
-      end;
+          dw      9, -3, -2, -1, -1, -1, 0, -1, 0, 0, 0, 0, 1
+          dw      0, 1, 1, 1, 2, 3
+
+    @GetLeftList:
+          pop     si
+          mov     ah, 19
+          mov     bl, Ovr
+          mov     cx, N
+          jcxz    @End
+          call    @PutList
+          jmp     @End
+
+    @Right:
+          call    @GetRightList
+
+          dw      0, 3, 2, 1, 1, 1, 0, 1, 0, 0, 0, 0, -1, 0, -1
+          dw      -1, -1, -2, -3
+
+    @GetRightList:
+          pop     si
+          mov     ah, 19
+          mov     bl, Ovr
+          mov     cx, N
+          jcxz    @End
+          call    @PutList
+    @End:
+          pop     es
     end;
   end;
-
 
   procedure PutClouds (Offset, N: Integer);
   var
@@ -193,7 +238,6 @@ implementation
     until (i > MaxClouds);
   end;
 
-
   procedure StartClouds;
   var
     i: Integer;
@@ -206,22 +250,76 @@ implementation
     end;
   end;
 
-
   procedure InitBackGr (NewBackGr, bClouds: Byte);
   var
-    i: Integer;
+    i, j, h: Integer;
+    X, Y, Z: Real;
+    F: Text;
   begin
     BackGround := NewBackGr;
     case BackGround of
       1, 2:
          begin
-           Move (BogenData, BackGrMap, SizeOf (BackGrMap));
+
+  {         RandSeed := 0;
+           FillChar (BackGrMap, SizeOf (BackGrMap), 0);
+           X := Pi / 4;
+           h := 6 + Random (Height - 5);
+           for i := 0 to Max do
+           begin
+             j := Round (Sqrt (H) * Sqrt (Abs (Round (h * Sin (X)))));
+             if BackGrMap [i] < j then
+               BackGrMap [i] := j;
+             if j = 0 then
+             begin
+               h := 5 + Random (Height - 4);
+               Dec (i, 1 + Random (Round (0.5 * Height)));
+               if i < 0 then i := 0;
+             end;
+             X := X + (Pi / (2.75 * h));
+           end;
+
+           assign (F, 'BOGEN26');
+           rewrite (F);
+           write (F, 'A'#24);
+           for i := 0 to Max do
+             Write (F, chr (BackGrMap[i]));
+           close (F); }
+
+           move (@BOGEN^, BackGrMap, SizeOf (BackGrMap));
          end;
       3: begin
-           Move (MountData, BackGrMap, SizeOf (BackGrMap));
+         {
+           RandSeed := $FF;
+           FillChar (BackGrMap, SizeOf (BackGrMap), #0);
+           j := 0;
+           Y := 1/3;
+           X := Height / 2;
+           for i := 0 to Max do
+           begin
+             X := X + Y;
+             if Y <> 0 then
+               if (X + Y >= Height) or (X + Y <= 1) or (Random (100) > 94) then
+               begin
+                 j := Random (3) + 3;
+                 Z := - Y * (10 + Random (1)) / ((10 + Random (1)));
+                 Y := 0;
+               end;
+             if j > 0 then
+             begin
+               Dec (j);
+               if j = 0 then
+                 Y := Z;
+             end;
+             BackGrMap [i] := Round (X);
+           end;
+         }
+           move (@MOUNT^, BackGrMap, SizeOf (BackGrMap));
          end;
-      9: Move (Bogen7Data, BackGrMap, SizeOf (BackGrMap));
-     10: Move (Bogen26Data, BackGrMap, SizeOf (BackGrMap));
+      9: move (@BOGEN7^, BackGrMap, SizeOf (BackGrMap));
+     10: move (@BOGEN26^, BackGrMap, SizeOf (BackGrMap));
+
+
     end;
     if BackGround in [1, 9, 10] then
       for i := 0 to Max do
@@ -232,148 +330,280 @@ implementation
       InitClouds;
   end;
 
-
   procedure PutBackGr (var Map; Fill: Boolean);
-  { Original uses planar VGA addressing (BYTES_PER_LINE=90, 4 planes).
-    Converted to linear FrameBuffer access with VIR_SCREEN_WIDTH row pitch.
+    var
+      Y,
+      PageOffset,
+      X1, X2, XPos, X1Pos, X2Pos,
+      DX,
+      OldXView,
+      XStart, OldXStart,
+      Count: Integer;
+      Bank: Byte;
 
-    The background map contains height values indexed by pixel column.
-    For each visible column, we compare the new height (from current scroll
-    position) with the old height (from previous scroll position) and update
-    the framebuffer accordingly:
-    - Pixels below the arch line: should be $E0 (background/fill color)
-    - Pixels above the arch line: should be $F0 (sky color)
-    Only pixels that need to change are modified (conditional on current value).
-
-    In Fill mode (first-time draw), every column gets full treatment.
-    In delta mode, only the difference between old and new heights is drawn,
-    plus any newly exposed columns from scrolling.
-
-    The original code iterates 4 times (once per VGA plane), processing
-    every 4th pixel column each time. In our linear framebuffer, we simply
-    iterate over every pixel column once. }
-  var
-    MapData: PByte;
-    Col, Row: Integer;
-    DX: Integer;
-    OldXView_: Integer;
-    X1Pos, X2Pos: Integer;
-    NewMapIdx, OldMapIdx: Integer;
-    NewH, OldH: Integer;
-    BaseY: Integer;
-    Pg: Integer;
-    Offs: LongInt;
-    WX: Integer;
-    Pix: Byte;
-    DoFill: Boolean;
   begin
-    Pg := CurrentPage;
-    MapData := @Map;
-    OldXView_ := LastXView[Pg];
-    BaseY := Options.Horizon - Height;
-    DX := XView - OldXView_;
-
-    { X1Pos..X2Pos defines the range where delta mode is used.
-      Columns outside this range get full fill treatment. }
+    PageOffset := GetPageOffset;
+    OldXView := LastXView[CurrentPage];
+    Y := PageOffset + (Options.Horizon - HEIGHT) * BYTES_PER_LINE;
+    X1 := Y + XView div 4;
+    X2 := Y + (XView + NH * W) div 4;
+    Bank := XView and 3;
+    DX := XView - OldXView;
+    XPos := XView;
     X1Pos := XView;
-    X2Pos := OldXView_ + NH * W - 1;
+    X2Pos := OldXView + NH * W - 1;
     if DX < 0 then
     begin
-      X1Pos := OldXView_;
+      X1Pos := OldXView;
       X2Pos := XView + NH * W - 1;
     end;
+    XStart := XView div Speed;
+    OldXStart := OldXView div Speed + DX;
+    asm
+          push    ds
+          push    es
+          mov     ax, VGA_SEGMENT
+          mov     es, ax
+          lds     si, Map
+          cld
+          mov     Count, 4
+    @1:   mov     cl, Bank
+          mov     ah, 1
+          shl     ah, cl
+          mov     al, MAP_MASK
+          mov     dx, SC_INDEX
+          out     dx, ax
+          mov     ah, cl
+          mov     al, READ_MAP
+          mov     dx, GC_INDEX
+          out     dx, ax
+          mov     dx, XPos
+          mov     al, $F0
+          mov     di, X1
+          mov     cx, OldXStart
+          mov     bx, XStart
+    @4:   push    bx
+          push    cx
+          push    dx
+          push    di
+          mov     ah, [bx + si]  { new position }
+          mov     bx, cx
+          mov     cl, [bx + si]  { old position }
+          mov     ch, 0
+          cmp     Fill, 0
+          jnz     @Fill
+          cmp     dx, X1Pos
+          jb      @Fill
+          cmp     dx, X2Pos
+          ja      @Fill
+          cmp     ah, cl
+          jz      @5
+          jl      @8
+    @6:   push    ax
+          mov     ax, BYTES_PER_LINE
+          mul     cx
+          add     di, ax
+          pop     ax
+    @7:   seges   cmp     [di], al
+          jnz     @@2
+          sub     al, $10
+          seges   mov     [di], al
+          add     al, $10
+    @@2:  add     di, BYTES_PER_LINE
+          inc     cl
+          cmp     cl, ah
+          jb      @7
+          jmp     @5
+    @8:   push    ax
+          mov     bx, BYTES_PER_LINE
+          mov     al, ah
+          mov     ah, 0
+          mul     bx
+          add     di, ax
+          pop     ax
+    @9:   sub     al, $10
+          seges   cmp     [di], al
+          pushf
+          add     al, $10
+          popf
+          jnz     @@1
+          seges   mov     [di], al
+    @@1:  add     di, BYTES_PER_LINE
+          inc     ah
+          cmp     ah, cl
+          jb      @9
+    @5:   pop     di
+          pop     dx
+          pop     cx
+          pop     bx
+          add     bx, 4
+          add     cx, 4
+          add     dx, 4
+          inc     di
+          cmp     di, X2
+          jb      @4
+    @2:   inc     Bank
+          cmp     Bank, 4
+          jnz     @3
+          and     Bank, 3
+          inc     X1
+          inc     X2
+    @3:   inc     OldXStart
+          inc     XStart
+          inc     XPos
+          dec     Count
+          jnz     @1
+          pop     es
+          pop     ds
+          jmp     @Exit
 
-    { Process every visible column }
-    for Col := XView to XView + NH * W - 1 do
-    begin
-      { Wrap X coordinate for framebuffer access }
-      WX := Col mod VIR_SCREEN_WIDTH;
-      if WX < 0 then Inc(WX, VIR_SCREEN_WIDTH);
+    @Fill:
+          push    bx
+          push    cx
+          mov     cl, ch
+          mov     ch, 0
+          mov     bl, ah
+          mov     bh, 0
+    @@5:  cmp     cx, HEIGHT
+          ja      @@3
+          cmp     cx, bx
+          jb      @@4
+          sub     al, $10
+          seges   cmp     [di], al
+          pushf
+          add     al, $10
+          popf
+          jnz     @@7
+          seges   mov     [di], al
+    @@7:  add     di, BYTES_PER_LINE
+          inc     cx
+          jmp     @@5
+    @@4:  seges   cmp     [di], al
+          jnz     @@6
+          sub     al, $10
+          seges   mov     [di], al
+          add     al, $10
+    @@6:  add     di, BYTES_PER_LINE
+          inc     cx
+          jmp     @@5
+    @@3:  pop     cx
+          pop     bx
+          jmp     @5
 
-      { Map index for current position: XView div Speed + (Col - XView)
-        This gives each pixel column its own map entry. }
-      NewMapIdx := (XView div Speed) + (Col - XView);
-
-      { Map index for old position: OldXView div Speed + (Col - XView)
-        Note: the original uses OldXStart = OldXView div Speed + DX, and
-        increments by 1 per column, so for column offset k from XView:
-        OldMapIdx = OldXView div Speed + DX + k = OldXView div Speed + (XView - OldXView) + k }
-      OldMapIdx := (OldXView_ div Speed) + DX + (Col - XView);
-
-      { Bounds check map indices }
-      if (NewMapIdx < 0) or (NewMapIdx > Max) then Continue;
-      if (OldMapIdx < 0) or (OldMapIdx > Max) then
-        OldMapIdx := NewMapIdx;
-
-      NewH := MapData[NewMapIdx];
-      OldH := MapData[OldMapIdx];
-
-      { Determine if this column gets full fill or delta treatment }
-      DoFill := Fill or (Col < X1Pos) or (Col > X2Pos);
-
-      if DoFill then
-      begin
-        { Full column fill: iterate from row 0 to HEIGHT.
-          Below NewH: if pixel is $F0, write $E0 (add background)
-          At/above NewH: if pixel is $E0, write $F0 (restore sky) }
-        for Row := 0 to Height do
-        begin
-          if (BaseY + Row >= 0) and (BaseY + Row < FB_HEIGHT) then
-          begin
-            Offs := LongInt(BaseY + Row) * VIR_SCREEN_WIDTH + WX;
-            Pix := FrameBuffer[Pg, Offs];
-            if Row < NewH then
-            begin
-              { Below arch: background color }
-              if Pix = $F0 then
-                FrameBuffer[Pg, Offs] := $E0;
-            end
-            else
-            begin
-              { Above arch: sky color }
-              if Pix = $E0 then
-                FrameBuffer[Pg, Offs] := $F0;
-            end;
-          end;
-        end;
-      end
-      else
-      begin
-        { Delta mode: only update rows that changed between old and new height }
-        if NewH = OldH then
-          { No change }
-        else if NewH > OldH then
-        begin
-          { Arch grew taller: fill from OldH to NewH-1 with background.
-            These rows were sky ($F0) and should become background ($E0). }
-          for Row := OldH to NewH - 1 do
-          begin
-            if (BaseY + Row >= 0) and (BaseY + Row < FB_HEIGHT) then
-            begin
-              Offs := LongInt(BaseY + Row) * VIR_SCREEN_WIDTH + WX;
-              if FrameBuffer[Pg, Offs] = $F0 then
-                FrameBuffer[Pg, Offs] := $E0;
-            end;
-          end;
-        end
-        else
-        begin
-          { Arch shrunk: erase from NewH to OldH-1 with sky.
-            These rows were background ($E0) and should become sky ($F0). }
-          for Row := NewH to OldH - 1 do
-          begin
-            if (BaseY + Row >= 0) and (BaseY + Row < FB_HEIGHT) then
-            begin
-              Offs := LongInt(BaseY + Row) * VIR_SCREEN_WIDTH + WX;
-              if FrameBuffer[Pg, Offs] = $E0 then
-                FrameBuffer[Pg, Offs] := $F0;
-            end;
-          end;
-        end;
-      end;
+    @Exit:
     end;
   end;
 
+  (*
+  const
+    CheckCode = 16;  { Don't draw background where this code is found }
+  var
+    Top,
+    Check: Word;
+  begin
+    Exit;
+    Top := Options.Horizon - Height;
+    Check := XView + (NV * H {+ WindowY}) * 320;  { Check code here }
+    asm
+          push    es
+          push    ds
+          mov     bx, 320
+          mov     ax, Top
+  {        add     ax, WindowY }
+          mul     bx
+          add     ax, XView
+          mov     di, ax
+          mov     ax, VidMemSeg
+          mov     es, ax
+          lds     si, Image
+          cld
+          mov     cx, 320
+          mov     bx, Check
+
+    @1:   push    cx
+          push    di
+
+          lodsb
+          push    si
+          push    bx
+
+          seges
+          cmp     Byte Ptr [bx], 0
+          jnz     @5
+
+          mov     ch, al
+          mov     cl, Height
+          sub     cl, ch       { cl: sky }
+          mov     bl, Height
+          sub     bl, al
+          mov     ax, 320
+          mov     bh, 0
+          mul     bx
+          add     di, ax
+          mov     si, di
+
+          add     cx, 0202h
+          mov     dh, 0
+
+          mov     al, $F0
+          seges   mov     dl, [di]
+          cmp     dl, $F0
+          jz      @_0
+
+    @3:   cmp     dl, $E0
+          jnz     @@1
+          dec     dh
+          stosb
+          dec     di
+    @@1:  add     di, 320
+          seges   mov     dl, [di]
+          cmp     dl, $F0
+          jnz     @_1
+    @_0:  dec     dh
+          jmp     @2
+    @_1:  dec     ch
+          jnz     @3
+
+    @2:   mov     di, si
+          mov     al, $E0
+          sub     di, 320
+          seges   mov     dl, [di]
+          cmp     dl, $E0
+          jz      @5
+
+    @4:   cmp     dl, $F0
+          jnz     @@2
+          dec     dh
+          stosb
+          dec     di
+    @@2:  sub     di, 320
+          seges   mov     dl, [di]
+          cmp     dl, $E0
+          jz      @5
+          dec     cl
+          jnz     @4
+
+          or      dh, dh
+          jnz     @5
+
+          pop     bx
+          seges
+          mov     byte ptr [bx], CheckCode
+          jmp     @6
+
+    @5:   pop     bx
+    @6:   pop     si
+          pop     di
+          inc     di
+          inc     bx
+          pop     cx
+          dec     cx
+          jnz     @1
+          pop     ds
+          pop     es
+    end;
+  end;
+  *)
 
   procedure BrickPalette (i: Integer);
   var
@@ -508,181 +738,211 @@ implementation
 
   procedure DrawBricks (X, Y, W, H: Integer);
   begin
-    PutImage (X, Y, W, H, Palbrick000Data);
+    {
+    for i := X to X + W - 1 do
+    begin
+      Fill (i, Y, 1, H div 2, $E0 + i and $0F);
+      PutPixel (i, Y, $F0);
+      Fill (i, Y + H div 2, 1, H div 2, $E0 + (i + 8) and $0F);
+      PutPixel (i, Y + H div 2, $F0);
+    end;
+    }
+
+    PutImage (X, Y, W, H, @PALBRICK000^);
+
   end;
 
   procedure LargeBricks (X, Y, W, H: Integer);
-  { Original used Mode 13h linear (320-byte rows) writing to segment $A000.
-    Converted to FrameBuffer[CurrentPage] with VIR_SCREEN_WIDTH row pitch.
-
-    Draws tiled large brick patterns with 3-row mortar lines every 16 rows.
-    Brick body uses cycling palette colors $E0..$FF (32-entry cycle).
-    The brick offset alternates by 16 pixels at every mortar line to create
-    the staggered brick-laying pattern.
-
-    Row within 16-row cycle:
-      0: mortar color $D6 (brightest), toggles brick shift
-      1: mortar color $D1 (darkest)
-      2: mortar color $D4 (medium)
-      3-15: brick body with cycling colors }
-  var
-    Row, Col: Integer;
-    BaseColor: Byte;
-    RowMod16: Integer;
-    Pg: Integer;
-    Offs: LongInt;
-    WX: Integer;
-    C, BrickCol: Byte;
   begin
-    if (W <= 0) or (H <= 0) then Exit;
-    Pg := CurrentPage;
+    asm
+            push  es
+            mov   bx, 320
+            mov   ax, Y
+  {          add   ax, WindowY }
+            mul   bx
+            add   ax, X
+            mov   di, ax
+            mov   bl, al
+            and   bl, 00011111b
+            add   bl, $E0
+            mov   ax, VGA_SEGMENT
+            mov   es, ax
+            mov   cx, H
+            mov   dx, Y
 
-    BaseColor := (X and $1F);
+            push  dx
+            add   dl, 14          { Why? }
+            and   dl, 00010000b
+            or    dl, dl
+            jz    @0
+            xor   bl, 16
+    @0:
+            pop   dx
 
-    if ((Y + 14) and $10) <> 0 then
-      BaseColor := BaseColor xor 16;
+            jcxz  @End
+    @1:
+            push  cx
+            mov   cx, W
+            jcxz  @3
+            push  di
 
-    for Row := 0 to H - 1 do
-    begin
-      if (Y + Row >= 0) and (Y + Row < FB_HEIGHT) then
-      begin
-        RowMod16 := (Y + Row) and $0F;
+            mov   al, $D4
+            and   dl, 00001111b
+            cmp   dl, 2
+            jz    @@1
+            ja    @Brick
+            mov   al, $D1
+            cmp   dl, 0
+            ja    @@1
+            mov   al, $D6
+            xor   bl, 16
+    @@1:
+            mov   ah, al
+            shr   cx, 1
+            rep   stosw
+            rcl   cx, 1
+            rep   stosb
+            jmp   @LineEnd
 
-        if RowMod16 = 0 then
-        begin
-          { Mortar line at row%16==0: color $D6, toggle brick shift }
-          C := $D6;
-          BaseColor := BaseColor xor 16;
-          for Col := 0 to W - 1 do
-          begin
-            WX := (X + Col) mod VIR_SCREEN_WIDTH;
-            if WX < 0 then Inc(WX, VIR_SCREEN_WIDTH);
-            Offs := LongInt(Y + Row) * VIR_SCREEN_WIDTH + WX;
-            FrameBuffer[Pg, Offs] := C;
-          end;
-        end
-        else if RowMod16 = 1 then
-        begin
-          { Mortar line at row%16==1: color $D1 }
-          C := $D1;
-          for Col := 0 to W - 1 do
-          begin
-            WX := (X + Col) mod VIR_SCREEN_WIDTH;
-            if WX < 0 then Inc(WX, VIR_SCREEN_WIDTH);
-            Offs := LongInt(Y + Row) * VIR_SCREEN_WIDTH + WX;
-            FrameBuffer[Pg, Offs] := C;
-          end;
-        end
-        else if RowMod16 = 2 then
-        begin
-          { Mortar line at row%16==2: color $D4 }
-          C := $D4;
-          for Col := 0 to W - 1 do
-          begin
-            WX := (X + Col) mod VIR_SCREEN_WIDTH;
-            if WX < 0 then Inc(WX, VIR_SCREEN_WIDTH);
-            Offs := LongInt(Y + Row) * VIR_SCREEN_WIDTH + WX;
-            FrameBuffer[Pg, Offs] := C;
-          end;
-        end
-        else
-        begin
-          { Brick body: cycling colors }
-          BrickCol := BaseColor;
-          for Col := 0 to W - 1 do
-          begin
-            WX := (X + Col) mod VIR_SCREEN_WIDTH;
-            if WX < 0 then Inc(WX, VIR_SCREEN_WIDTH);
-            Offs := LongInt(Y + Row) * VIR_SCREEN_WIDTH + WX;
-            C := $E0 + (BrickCol and $1F);
-            FrameBuffer[Pg, Offs] := C;
-            Inc(BrickCol);
-          end;
-        end;
-      end
-      else
-      begin
-        { Row is off-screen but we still need to track mortar toggles }
-        RowMod16 := (Y + Row) and $0F;
-        if RowMod16 = 0 then
-          BaseColor := BaseColor xor 16;
-      end;
+    @Brick:
+            mov   al, bl
+    @2:
+            and   al, 00011111b
+            add   al, $E0
+            stosb
+            inc   al
+            dec   cx
+            jnz   @2
+
+    @LineEnd:
+            pop   di
+            add   di, 320
+    @3:
+            pop   cx
+            inc   dx
+            dec   cx
+            jnz   @1
+    @End:
+            pop   es
     end;
   end;
-
 
   procedure Pillar (X, Y, W, H: Integer);
   begin
     case (X div W) mod 3 of
-      0: PutImage (X, Y, W, H, Palpill000Data);
-      1: PutImage (X, Y, W, H, Palpill001Data);
-      2: PutImage (X, Y, W, H, Palpill002Data);
+      0: PutImage (X, Y, W, H, @PalPill000^);
+      1: PutImage (X, Y, W, H, @PalPill001^);
+      2: PutImage (X, Y, W, H, @PalPill002^);
     end;
-  end;
 
+  (*  asm
+            push  es
+            mov   bx, 320
+            mov   ax, Y
+  {          add   ax, WindowY }
+            mul   bx
+            add   ax, X
+            mov   di, ax
+            mov   bl, al
+            or    bl, $C0
+            mov   ax, VidMemSeg
+            mov   es, ax
+            mov   cx, H
+            jcxz  @End
+    @1:
+            push  cx
+            mov   cx, W
+            jcxz  @3
+
+            push  di
+
+            mov   al, bl
+    @2:     or    al, 0C0h
+            stosb
+            inc   al
+            dec   cx
+            jnz   @2
+
+    @LineEnd:
+            pop   di
+            add   di, 320
+    @3:
+            pop   cx
+            inc   dx
+            dec   cx
+            jnz   @1
+    @End:
+            pop   es
+    end;  *)
+  end;
 
   procedure Windows (X, Y, W, H: Integer);
-  { Original used Mode 13h linear (320-byte rows) writing to segment $A000.
-    Converted to FrameBuffer[CurrentPage] with VIR_SCREEN_WIDTH row pitch.
-
-    Draws building window patterns. Within each 32-row cycle, rows where
-    (Y+22) AND $1F < 3 are "glass" rows (solid color 1 = white/light),
-    and the remaining rows are "wall" with cycling palette colors. }
-  var
-    Row, Col: Integer;
-    BaseColor: Byte;
-    RowInWindow: Integer;
-    Pg: Integer;
-    Offs: LongInt;
-    WX: Integer;
-    C, WallCol: Byte;
+  const
+    Y1 =  50;
+    Y2 =  80;
   begin
-    if (W <= 0) or (H <= 0) then Exit;
-    Pg := CurrentPage;
+    asm
+            push  es
+            mov   bx, 320
+            mov   ax, Y
+            mov   si, ax
+            add   si, 22
+  {          add   ax, WindowY }
+            mul   bx
+            add   ax, X
+            mov   di, ax
+            mov   bl, al
+            or    bl, $C0
+            mov   ax, VGA_SEGMENT
+            mov   es, ax
+            mov   cx, H
+            jcxz  @End
+    @1:
+            push  cx
+            mov   cx, W
+            jcxz  @3
 
-    { Base color from X position, same as LargeBricks }
-    BaseColor := X and $1F;
+            push  di
+            mov   al, bl
 
-    for Row := 0 to H - 1 do
-    begin
-      if (Y + Row >= 0) and (Y + Row < FB_HEIGHT) then
-      begin
-        RowInWindow := (Y + Row + 22) and $1F;
+            and   si, 00011111b
+            cmp   si, 00000011b
+            jb    @4
 
-        if RowInWindow < 3 then
-        begin
-          { Glass/light rows: fill with color 1 }
-          for Col := 0 to W - 1 do
-          begin
-            WX := (X + Col) mod VIR_SCREEN_WIDTH;
-            if WX < 0 then Inc(WX, VIR_SCREEN_WIDTH);
-            Offs := LongInt(Y + Row) * VIR_SCREEN_WIDTH + WX;
-            FrameBuffer[Pg, Offs] := 1;
-          end;
-        end
-        else
-        begin
-          { Wall rows: cycling colors $E0 + ((BaseColor + Col) AND $1F) }
-          WallCol := BaseColor;
-          for Col := 0 to W - 1 do
-          begin
-            WX := (X + Col) mod VIR_SCREEN_WIDTH;
-            if WX < 0 then Inc(WX, VIR_SCREEN_WIDTH);
-            Offs := LongInt(Y + Row) * VIR_SCREEN_WIDTH + WX;
-            C := $E0 or (WallCol and $1F);
-            FrameBuffer[Pg, Offs] := C;
-            Inc(WallCol);
-          end;
-        end;
-      end;
+    @2:     and   al, 00011111b
+            or    al, 11100000b
+            stosb
+            inc   al
+            dec   cx
+            jnz   @2
+            jmp   @LineEnd
+
+    @4:     mov   ax, 0101h
+            cld
+            shr   cx, 1
+            rep   stosw
+            rcl   cx, 1
+            rep   stosb
+
+    @LineEnd:
+            pop   di
+            add   di, 320
+    @3:
+            pop   cx
+            inc   dx
+            inc   si
+            dec   cx
+            jnz   @1
+    @End:
+            pop   es
     end;
   end;
-
 
   procedure DrawBackGrBlock (X, Y, W, H: Integer);
   var
     i: Integer;
   begin
+  {  Fill (X, Y, W, H, $F0); }
     if Options.SkyType in [2, 5, 9, 10, 11] then
       SmoothFill (X, Y, W, H)
     else
@@ -698,114 +958,118 @@ implementation
       end;
   end;
 
-
   procedure SmoothFill (X, Y, W, H: Integer);
-  { Original used planar VGA (VIR_SCREEN_WIDTH/4 bytes per row, plane masking).
-    Converted to linear FrameBuffer access with VIR_SCREEN_WIDTH row pitch.
-    Constraint from original: X mod 4 = 0, W mod 4 = 0.
-
-    Draws a vertical gradient using colors $E0..$EF..$F0.
-    The color decreases by 1 every 6 rows (getting lighter toward the horizon).
-    At Y >= Horizon, the color is fixed at $F0 (ground/sky boundary).
-
-    Dithering: on sub-rows 3, 4, 5 within each 6-row band, a secondary color
-    (one step darker, i.e. color-1) is drawn on specific pixel columns:
-      - Sub-row 3 (dh=3, dh AND 1 = 1): plane 1 -> pixels where col mod 4 == 1
-      - Sub-row 4 (dh=4, dh AND 1 = 0): plane 0 -> pixels where col mod 4 == 0
-      - Sub-row 5 (dh=5, dh AND 1 = 1): plane 1 -> pixels where col mod 4 == 1
-    This creates a smooth gradient transition between color bands.
-
-    When the base color is $E0 or $F0, no dithering is applied. }
-  var
-    Row, Col: Integer;
-    Pg: Integer;
-    Offs: LongInt;
-    WX: Integer;
-    BaseColor: Byte;       { dl in original: the main fill color }
-    SubRow: Byte;           { dh in original: 0..5 position within 6-row band }
-    Horizon: Integer;
-    CurY: Integer;
-    DitherColor: Byte;
-    DitherPlane: Integer;   { which plane (mod 4 value) gets the dither }
+    { X mod 4 = 0, W mod 4 = 0 }
+    var
+      PageOffset: Word;
+      Horizon: Integer;
   begin
-    if (W <= 0) or (H <= 0) then Exit;
-    Pg := CurrentPage;
+    PageOffset := GetPageOffset;
     Horizon := Options.Horizon - 4;  { -4 for BumpBlock }
+    asm
+        push    es
+        mov     ax, VGA_SEGMENT
+        mov     es, ax
 
-    { Calculate initial color and sub-row position from Y.
-      Original: ax = Y; div 6 -> al = Y/6, ah = Y mod 6
-      dl = $EF - al; if dl < $E0 then dl = $E0; dh = ah }
-    if Y >= Horizon then
-    begin
-      BaseColor := $F0;
-      SubRow := Y mod 6;
-    end
-    else
-    begin
-      BaseColor := $EF - (Y div 6);
-      if BaseColor < $E0 then
-        BaseColor := $E0;
-      SubRow := Y mod 6;
-    end;
+        mov     dx, Y
+        mov     ax, VIR_SCREEN_WIDTH / 4
+        mul     dx
+        mov     di, X
+        shr     di, 1
+        shr     di, 1
+        add     di, ax
+        add     di, PageOffset
 
-    for Row := 0 to H - 1 do
-    begin
-      CurY := Y + Row;
-      if (CurY >= 0) and (CurY < FB_HEIGHT) then
-      begin
-        { First pass: fill entire row with BaseColor, with X wrapping }
-        for Col := 0 to W - 1 do
-        begin
-          WX := (X + Col) mod VIR_SCREEN_WIDTH;
-          if WX < 0 then Inc(WX, VIR_SCREEN_WIDTH);
-          Offs := LongInt(CurY) * VIR_SCREEN_WIDTH + WX;
-          FrameBuffer[Pg, Offs] := BaseColor;
-        end;
+        mov     ax, Y
+        cmp     ax, Horizon
+        jb      @0
+        mov     dl, $F0
+        jmp     @3
 
-        { Second pass: dithering on sub-rows >= 3 }
-        if SubRow >= 3 then
-        begin
-          { Compute dither color: BaseColor - 1, unless at $E0 or $F0 }
-          if (BaseColor <> $E0) and (BaseColor <> $F0) then
-            DitherColor := BaseColor - 1
-          else
-            DitherColor := BaseColor;
+    @0: mov     bl, 6
+        div     bl
+        mov     dl, $EF
+        sub     dl, al
+        cmp     dl, $E0
+        jnb     @3
+        mov     dl, $E0
+    @3: mov     dh, ah
 
-          { Determine which pixel columns get the dither:
-            dh AND 1 selects the VGA plane.
-            SubRow=3: plane 1 (col mod 4 == 1)
-            SubRow=4: plane 0 (col mod 4 == 0)
-            SubRow=5: plane 1 (col mod 4 == 1) }
-          DitherPlane := SubRow and 1;  { 0 for even subrow, 1 for odd }
+        mov     bx, H
+        cmp     bx, 0
+        jle     @End
+        mov     cx, W
+        shr     cx, 1
+        shr     cx, 1
 
-          { Only overwrite if dither color differs from base }
-          if DitherColor <> BaseColor then
-          begin
-            Col := DitherPlane;
-            while Col < W do
-            begin
-              WX := (X + Col) mod VIR_SCREEN_WIDTH;
-              if WX < 0 then Inc(WX, VIR_SCREEN_WIDTH);
-              Offs := LongInt(CurY) * VIR_SCREEN_WIDTH + WX;
-              FrameBuffer[Pg, Offs] := DitherColor;
-              Inc(Col, 4);
-            end;
-          end;
-        end;
-      end;
+        cld
 
-      { Advance sub-row and color for next row.
-        Original: inc Y; if Y >= Horizon then dl = $F0;
-                  inc dh; if dh = 6 then dh = 0 and dec dl (unless $E0/$F0) }
-      if (CurY + 1) >= Horizon then
-        BaseColor := $F0;
-      Inc(SubRow);
-      if SubRow >= 6 then
-      begin
-        SubRow := 0;
-        if (BaseColor <> $E0) and (BaseColor <> $F0) then
-          Dec(BaseColor);
-      end;
+    @1: push    di
+        push    cx
+        push    dx
+        mov     ah, 0Fh
+        mov     al, MAP_MASK
+        mov     dx, SC_INDEX
+        out     dx, ax
+        pop     dx
+        mov     al, dl
+        mov     ah, al
+        shr     cx, 1
+        rep     stosw
+        rcl     cx, 1
+        rep     stosb
+        pop     cx
+        pop     di
+
+        cmp     dh, 3
+        jb      @4
+        cmp     al, $E0
+        jz      @2
+        cmp     al, $F0
+        jz      @2
+        sub     ax, 0101h
+    @2: push    ax
+        push    dx
+        mov     ah, 0101b
+        push    cx
+        mov     cl, dh
+        and     cl, 1
+        shl     ah, cl
+        pop     cx
+        mov     al, MAP_MASK
+        mov     dx, SC_INDEX
+        out     dx, ax
+        pop     dx
+        pop     ax
+        push    di
+        push    cx
+        shr     cx, 1
+        rep     stosw
+        rcl     cx, 1
+        rep     stosb
+        pop     cx
+        pop     di
+
+    @4: inc     Y
+        mov     ax, Y
+        cmp     ax, Horizon
+        jb      @9
+        mov     dl, $F0
+    @9: inc     dh
+        cmp     dh, 6
+        jnz     @5
+        mov     dh, 0
+        cmp     dl, $E0
+        jz      @5
+        cmp     dl, $F0
+        jz      @5
+        dec     dl
+    @5: add     di, VIR_SCREEN_WIDTH / 4
+        dec     bx
+        jnz     @1
+
+  @End:
+        pop     es
     end;
   end;
 

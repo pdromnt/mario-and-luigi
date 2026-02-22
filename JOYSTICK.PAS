@@ -1,7 +1,10 @@
 unit Joystick;
 
-  {  SDL2 replacement for DOS joystick unit  }
-  {  Original (C) Copyright 1995-2001, Mike Wiering  }
+  {  (C) Copyright 1995-2001, Mike Wiering, e-mail: mike.wiering@wxs.nl  }
+
+  {
+     Joystick unit for use with Turbo Pascal 6/7
+  }
 
 interface
 
@@ -45,129 +48,138 @@ interface
 implementation
 
   uses
-    sdl2;
+    Crt;
 
   const
-    DEAD_ZONE = 8000;  { SDL axis dead zone threshold }
-
-  var
-    SDLJoystick: PSDL_Joystick;
+    JOYSTICK_PORT = $201;
 
   procedure ReadJoystick;
-  var
-    AxisX, AxisY: SmallInt;
   begin
     jr.X := 0;
     jr.Y := 0;
-
-    if not jsEnabled then
-    begin
-      jsLeft := FALSE;
-      jsRight := FALSE;
-      jsUp := FALSE;
-      jsDown := FALSE;
-      jsButton1 := FALSE;
-      jsButton2 := FALSE;
-      Exit;
+    if jsEnabled then
+    asm
+        pushf
+        sub     cx, cx
+        mov     dx, JOYSTICK_PORT
+        in      al, dx
+        not     al
+        mov     ah, al
+        and     ax, 2010h
+        mov     jsButton1, al
+        shr     ah, 1
+        mov     jsButton2, ah
+        mov     bx, 0201h
+        cli
+        out     dx, al
+        mov     ah, 0
+    @@1:
+        in      al, dx
+        and     al, bl
+        add     jr.X, ax
+        in      al, dx
+        and     al, bh
+        shr     al, 1
+        add     jr.Y, ax
+        in      al, dx
+        test    al, 3
+        jz      @@2
+        inc     cx
+        jnz     @@1
+        mov     jsEnabled, 0
+    @@2:
+        popf
     end;
-
-    if SDLJoystick = nil then
-    begin
-      jsEnabled := FALSE;
-      jsLeft := FALSE;
-      jsRight := FALSE;
-      jsUp := FALSE;
-      jsDown := FALSE;
-      jsButton1 := FALSE;
-      jsButton2 := FALSE;
-      Exit;
-    end;
-
-    { Read axis values (-32768..32767) }
-    AxisX := SDL_JoystickGetAxis(SDLJoystick, 0);
-    AxisY := SDL_JoystickGetAxis(SDLJoystick, 1);
-
-    { Map to jr record for compatibility }
-    jr.X := Word((LongInt(AxisX) + 32768) div 256);  { 0..255 range }
-    jr.Y := Word((LongInt(AxisY) + 32768) div 256);
-
-    { Read buttons }
-    jsButton1 := SDL_JoystickGetButton(SDLJoystick, 0) <> 0;
-    jsButton2 := SDL_JoystickGetButton(SDLJoystick, 1) <> 0;
-
-    if not jsWaitButton then
-    begin
-      jsLeft := AxisX < -DEAD_ZONE;
-      jsRight := AxisX > DEAD_ZONE;
-      jsUp := AxisY < -DEAD_ZONE;
-      jsDown := AxisY > DEAD_ZONE;
-    end
-    else
-    begin
-      jsLeft := FALSE;
-      jsRight := FALSE;
-      jsUp := FALSE;
-      jsDown := FALSE;
-      jsButtonPressed := jsButtonPressed or jsButton1 or jsButton2;
-      jsButton1 := FALSE;
-      jsButton2 := FALSE;
-    end;
+    with jr do
+      if jsEnabled and (not jsWaitButton) then
+      begin
+        jsLeft := (X < XLeft);
+        jsRight := (X > XRight);
+        jsUp := (Y < YUp);
+        jsDown := (Y > YDown);
+      end
+      else
+      begin
+        jsLeft := FALSE;
+        jsRight := FALSE;
+        jsUp := FALSE;
+        jsDown := FALSE;
+        jsButtonPressed := jsButtonPressed or jsButton1 or jsButton2;
+        jsButton1 := FALSE;
+        jsButton2 := FALSE;
+      end;
   end;
 
   procedure ResetJoystick;
+    var
+      i: Integer;
+      TotalX,
+      TotalY: LongInt;
   begin
-    jsEnabled := SDL_NumJoysticks > 0;
-    if jsEnabled then
-    begin
-      if SDLJoystick = nil then
-        SDLJoystick := SDL_JoystickOpen(0);
-      jsEnabled := SDLJoystick <> nil;
-    end;
-
+    jsEnabled := TRUE;
+    ReadJoystick;
     if jsEnabled then
       with jr do
       begin
-        XCenter := 128;
-        YCenter := 128;
-        XMin := 0;
-        YMin := 0;
-        XMax := 255;
-        YMax := 255;
-        XLeft := 64;
-        YUp := 64;
-        XRight := 192;
-        YDown := 192;
+        TotalX := 0;
+        TotalY := 0;
+        for i := 1 to 16 do
+        begin
+          ReadJoystick;
+          Inc (TotalX, X);
+          Inc (TotalY, Y);
+        end;
+        X := TotalX div 16;
+        Y := TotalY div 16;
+        XCenter := X;
+        YCenter := Y;
+        XMin := X;
+        YMin := Y;
+        XMax := X;
+        YMax := Y;
+        XLeft := X;
+        YUp := Y;
+        XRight := X;
+        YUp := Y;
+        ReadJoystick;
         jsCalibrated := FALSE;
       end;
-    ReadJoystick;
   end;
 
   procedure Calibrate;
   begin
     ReadJoystick;
-    { SDL handles dead zones and calibration automatically }
-    { We just keep the interface for compatibility }
     if jsEnabled then
-      jsCalibrated := TRUE;
+      with jr do
+      begin
+        if X < XMin then
+        begin
+          XMin := X;
+          XLeft := (XMin + XCenter) div 2;
+        end;
+        if Y < YMin then
+        begin
+          YMin := Y;
+          YUp := (YMin + YCenter) div 2;
+        end;
+        if X > XMax then
+        begin
+          XMax := X;
+          XRight := (XMax + XCenter) div 2;
+        end;
+        if Y > YMax then
+        begin
+          YMax := Y;
+          YDown := (YMax + YCenter) div 2;
+        end;
+        jsCalibrated := TRUE;
+      end;
   end;
 
 begin
-  SDLJoystick := nil;
   jsCalibrated := FALSE;
   jsWaitButton := FALSE;
-  jsDetected := FALSE;
-  jsEnabled := FALSE;
-
-  { Try to open joystick if available }
-  if SDL_NumJoysticks > 0 then
-  begin
-    SDLJoystick := SDL_JoystickOpen(0);
-    if SDLJoystick <> nil then
-    begin
-      jsDetected := TRUE;
-      jsEnabled := TRUE;
-    end;
-  end;
-
+  ResetJoystick;
+  jsDetected := jsEnabled;
   ReadJoystick;
 end.

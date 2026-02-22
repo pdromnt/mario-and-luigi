@@ -1,8 +1,10 @@
 unit Keyboard;
 
-  {  SDL2 replacement for the Turbo Pascal Keyboard unit  }
-  {  Original (C) Copyright 1994-2001, Mike Wiering       }
-  {  Preserves identical interface                         }
+  {  (C) Copyright 1994-2001, Mike Wiering, e-mail: mike.wiering@wxs.nl  }
+
+  {
+     Keyboard unit for use with Turbo Pascal 6/7
+  }
 
 interface
 
@@ -57,13 +59,10 @@ interface
 
   function GetAsciiCode (c: Char): Char;
 
-  { SDL-specific: must be called each frame to process events }
-  procedure PollKeyboard;
-
 implementation
 
   uses
-    sdl2;
+    Dos;
 
   const
     MaxKeys = 9;
@@ -93,130 +92,116 @@ implementation
     Recording: Boolean = FALSE;
     Playing: Boolean = FALSE;
 
+  var
+    OldKbIntVec: Procedure;
+    OldExitProc: Pointer;
+
   const
     KeyMap: Array[1..MaxKeys] of Boolean =
       (False, False, False, False, False, False, False, False, False);
 
+    PressCode: Array[1..MaxKeys] of Char =
+      ('K', 'M', 'H', 'P', '8', #29, '*', '6', '9');
+
+    ReleaseCode: Array[1..MaxKeys] of Char =
+      (#203, #205, #200, #208, #184, #157, #170, #182, #185);
+
+  const
     HandlerActive: Boolean = FALSE;
     KeyHit: Boolean = FALSE;
 
-  { Demo keys data - extracted from DEMOKEYS.OBJ }
-  {$I data\demokeys.inc}
+  procedure Macro; external; {$L DEMOKEYS.OBJ}
 
-  function MapSDLKeyToScancode(sym: TSDL_Keycode): Byte;
-    { Map SDL key code to PC AT scancode }
+  {$F+}
+  procedure NewExitProc;
   begin
-    case sym of
-      SDLK_ESCAPE:    MapSDLKeyToScancode := 1;
-      SDLK_1:         MapSDLKeyToScancode := 2;
-      SDLK_2:         MapSDLKeyToScancode := 3;
-      SDLK_3:         MapSDLKeyToScancode := 4;
-      SDLK_4:         MapSDLKeyToScancode := 5;
-      SDLK_5:         MapSDLKeyToScancode := 6;
-      SDLK_6:         MapSDLKeyToScancode := 7;
-      SDLK_7:         MapSDLKeyToScancode := 8;
-      SDLK_8:         MapSDLKeyToScancode := 9;
-      SDLK_9:         MapSDLKeyToScancode := 10;
-      SDLK_0:         MapSDLKeyToScancode := 11;
-      SDLK_BACKSPACE: MapSDLKeyToScancode := 14;
-      SDLK_TAB:       MapSDLKeyToScancode := 15;
-      SDLK_q:         MapSDLKeyToScancode := 16;
-      SDLK_w:         MapSDLKeyToScancode := 17;
-      SDLK_e:         MapSDLKeyToScancode := 18;
-      SDLK_r:         MapSDLKeyToScancode := 19;
-      SDLK_t:         MapSDLKeyToScancode := 20;
-      SDLK_y:         MapSDLKeyToScancode := 21;
-      SDLK_u:         MapSDLKeyToScancode := 22;
-      SDLK_i:         MapSDLKeyToScancode := 23;
-      SDLK_o:         MapSDLKeyToScancode := 24;
-      SDLK_p:         MapSDLKeyToScancode := 25;
-      SDLK_RETURN:    MapSDLKeyToScancode := 28;
-      SDLK_a:         MapSDLKeyToScancode := 30;
-      SDLK_s:         MapSDLKeyToScancode := 31;
-      SDLK_d:         MapSDLKeyToScancode := 32;
-      SDLK_f:         MapSDLKeyToScancode := 33;
-      SDLK_g:         MapSDLKeyToScancode := 34;
-      SDLK_h:         MapSDLKeyToScancode := 35;
-      SDLK_j:         MapSDLKeyToScancode := 36;
-      SDLK_k:         MapSDLKeyToScancode := 37;
-      SDLK_l:         MapSDLKeyToScancode := 38;
-      SDLK_z:         MapSDLKeyToScancode := 44;
-      SDLK_x:         MapSDLKeyToScancode := 45;
-      SDLK_c:         MapSDLKeyToScancode := 46;
-      SDLK_v:         MapSDLKeyToScancode := 47;
-      SDLK_b:         MapSDLKeyToScancode := 48;
-      SDLK_n:         MapSDLKeyToScancode := 49;
-      SDLK_m:         MapSDLKeyToScancode := 50;
-      SDLK_SPACE:     MapSDLKeyToScancode := 57;
-      SDLK_UP:        MapSDLKeyToScancode := 72;
-      SDLK_LEFT:      MapSDLKeyToScancode := 75;
-      SDLK_RIGHT:     MapSDLKeyToScancode := 77;
-      SDLK_DOWN:      MapSDLKeyToScancode := 80;
-    else
-      MapSDLKeyToScancode := 0;
-    end;
+    KeyBoardDone;
+    ExitProc := OldExitProc;
   end;
+  {$F-}
 
-  procedure PollKeyboard;
-    { Process SDL events and update key states }
-  var
-    Event: TSDL_Event;
-    sc: Byte;
-  begin
-    while SDL_PollEvent(@Event) <> 0 do
-    begin
-      case Event.type_ of
-        SDL_KEYDOWN:
-          begin
-            KeyHit := True;
-            sc := MapSDLKeyToScancode(Event.key.keysym.sym);
-            if sc <> 0 then
-              Key := Chr(sc);
+  {$F+}
+  procedure GetKey; Assembler;
+  asm
+          pushf
+          push    ax
+          push    cx
+          push    dx
+          push    di
+          push    es
+          mov     ax, seg @Data
+          mov     es, ax
+          inc     es:KeyHit
+          in      al, 60h
+          mov     dl, al
+          mov     es:Key, al
+          mov     di, offset PressCode
+          mov     cx, MaxKeys
+          cld
+          repnz
+          scasb
+          jnz     @1
+          mov     di, offset KeyMap[MaxKeys]
+          sub     di, cx
+          mov     al, 1
+          dec     di
+          stosb
+          jmp     @2
+  @1:     mov     di, offset ReleaseCode
+          mov     cx, MaxKeys
+          cld
+          repnz
+          scasb
+          jnz     @2
+          mov     es:KeyHit, 0
+          mov     di, offset KeyMap[MaxKeys]
+          sub     di, cx
+          mov     al, 0
+          dec     di
+          stosb
+  @2:     pop     es
+          in      al, 61h
+          push    ax
+          or      al, 80h
+          out     61h, al
+          pop     ax
+          out     61h, al
+          cli
+          mov     al, 20h
+          out     20h, al
+          sti
 
-            case Event.key.keysym.sym of
-              SDLK_LEFT:                     KeyMap[keyLeft] := True;
-              SDLK_RIGHT:                    KeyMap[keyRight] := True;
-              SDLK_UP:                       KeyMap[keyUp] := True;
-              SDLK_DOWN:                     KeyMap[keyDown] := True;
-              SDLK_LALT, SDLK_RALT:         KeyMap[keyAlt] := True;
-              SDLK_LCTRL, SDLK_RCTRL:       KeyMap[keyCtrl] := True;
-              SDLK_LSHIFT:                   KeyMap[keyShiftL] := True;
-              SDLK_RSHIFT:                   KeyMap[keyShiftR] := True;
-              SDLK_SPACE:                    KeyMap[keySpace] := True;
-            end;
-          end;
-
-        SDL_KEYUP:
-          begin
-            case Event.key.keysym.sym of
-              SDLK_LEFT:                     KeyMap[keyLeft] := False;
-              SDLK_RIGHT:                    KeyMap[keyRight] := False;
-              SDLK_UP:                       KeyMap[keyUp] := False;
-              SDLK_DOWN:                     KeyMap[keyDown] := False;
-              SDLK_LALT, SDLK_RALT:         KeyMap[keyAlt] := False;
-              SDLK_LCTRL, SDLK_RCTRL:       KeyMap[keyCtrl] := False;
-              SDLK_LSHIFT:                   KeyMap[keyShiftL] := False;
-              SDLK_RSHIFT:                   KeyMap[keyShiftR] := False;
-              SDLK_SPACE:                    KeyMap[keySpace] := False;
-            end;
-          end;
-
-        SDL_QUITEV:
-          Halt(0);
-      end;
-    end;
+          pop     di
+          pop     dx
+          pop     cx
+          pop     ax
+          popf
+          iret
   end;
+  {$F-}
 
   procedure InitKeyBoard;
+    var
+      i: Integer;
   begin
+    Port[$60] := $ED;
+    for i := 1 to 1000 do ;
+    Port[$60] := 0;
+    OldExitProc := ExitProc;
+    GetIntVec($09, @OldKbIntVec);
+    ExitProc := @NewExitProc;
+    SetIntVec($09, Addr(GetKey));
     HandlerActive := TRUE;
     KeyHit := FALSE;
-    Key := #0;
   end;
 
   procedure KeyBoardDone;
   begin
+    if not HandlerActive then
+      Exit;
+    SetIntVec($09, @OldKbIntVec);
     HandlerActive := FALSE;
+    Mem[$0:$417] := 0;
   end;
 
   procedure ResetKeyBoard;
@@ -225,7 +210,8 @@ implementation
   begin
     Recording := FALSE;
     Playing := FALSE;
-    for i := 1 to MaxKeys do
+    for i := 1 to MaxKeys
+    do
       KeyMap[i] := False;
     Key := #0;
   end;
@@ -234,8 +220,8 @@ implementation
   begin
     Recording := TRUE;
     Playing := FALSE;
-    FillChar(SeqPos, SizeOf(SeqPos), 0);
-    FillChar(Sequence, SizeOf(SeqPos), 0);
+    FillChar (SeqPos, sizeof (SeqPos), 0);
+    FillChar (Sequence, sizeof (SeqPos), 0);
     RandSeed := 0;
   end;
 
@@ -243,8 +229,9 @@ implementation
   begin
     Playing := TRUE;
     Recording := FALSE;
-    FillChar(SeqPos, SizeOf(SeqPos), 0);
-    Move(DemoKeysData, Sequence, SizeOf(Sequence));
+    FillChar (SeqPos, sizeof (SeqPos), 0);
+    Move (@Macro^, Sequence, sizeof (Sequence));
+{    FillChar (Sequence, sizeof (SeqPos), 0); }
     RandSeed := 0;
   end;
 
@@ -255,17 +242,18 @@ implementation
   end;
 
   procedure SaveMacro;
-  var
-    F: File of KeySeq;
-    i: Integer;
+    var
+      F: File of KeySeq;
+      i: Integer;
   begin
-    Assign(F, '$');
-    ReWrite(F);
+    Assign (F, '$');
+    ReWrite (F);
     for i := 1 to MaxKeys do
-      Write(F, Sequence[i]);
-    Close(F);
+      Write (F, Sequence[i]);
+    Close (F);
+
     Recording := FALSE;
-    FillChar(SeqPos, SizeOf(SeqPos), 0);
+    FillChar (SeqPos, sizeof (SeqPos), 0);
   end;
 
   function PlayingMacro: Boolean;
@@ -282,11 +270,11 @@ implementation
       begin
         if Press xor (SeqPos[KeyNr] mod 2 = 1) then
         begin
-          Inc(SeqPos[KeyNr]);
+          Inc (SeqPos[KeyNr]);
           if SeqPos[KeyNr] >= MAX_SEQ_LEN then
             SeqPos[KeyNr] := MAX_SEQ_LEN - 1;
         end;
-        Inc(Sequence[KeyNr, SeqPos[KeyNr]]);
+        Inc (Sequence[KeyNr, SeqPos[KeyNr]]);
       end;
       if Playing then
       begin
@@ -294,9 +282,9 @@ implementation
           Playing := FALSE
         else
         begin
-          Dec(Sequence[KeyNr, SeqPos[KeyNr]]);
+          Dec (Sequence[KeyNr, SeqPos[KeyNr]]);
           if Sequence[KeyNr, SeqPos[KeyNr]] = 0 then
-            Inc(SeqPos[KeyNr]);
+            Inc (SeqPos[KeyNr]);
           Check := (SeqPos[KeyNr] mod 2 = 1);
         end;
       end;
@@ -311,47 +299,47 @@ implementation
 
   function kbLeft: Boolean;
   begin
-    kbLeft := Check(keyLeft, KeyMap[keyLeft]);
+    kbLeft := Check (keyLeft, KeyMap[keyLeft]);
   end;
 
   function kbRight: Boolean;
   begin
-    kbRight := Check(keyRight, KeyMap[keyRight]);
+    kbRight := Check (keyRight, KeyMap[keyRight]);
   end;
 
   function kbUp: Boolean;
   begin
-    kbUp := Check(keyUp, KeyMap[keyUp]);
+    kbUp := Check (keyUp, KeyMap[keyUp]);
   end;
 
   function kbDown: Boolean;
   begin
-    kbDown := Check(keyDown, KeyMap[keyDown]);
+    kbDown := Check (keyDown, KeyMap[keyDown]);
   end;
 
   function kbAlt: Boolean;
   begin
-    kbAlt := Check(keyAlt, KeyMap[keyAlt]);
+    kbAlt := Check (keyAlt, KeyMap[keyAlt]);
   end;
 
   function kbCtrl: Boolean;
   begin
-    kbCtrl := Check(keyCtrl, KeyMap[keyCtrl]);
+    kbCtrl := Check (keyCtrl, KeyMap[keyCtrl]);
   end;
 
   function kbLeftShift: Boolean;
   begin
-    kbLeftShift := Check(keyShiftL, KeyMap[keyShiftL]);
+    kbLeftShift := Check (keyShiftL, KeyMap[keyShiftL]);
   end;
 
   function kbRightShift: Boolean;
   begin
-    kbRightShift := Check(keyShiftR, KeyMap[keyShiftR]);
+    kbRightShift := Check (keyShiftR, KeyMap[keyShiftR]);
   end;
 
   function kbSpace: Boolean;
   begin
-    kbSpace := Check(keySpace, KeyMap[keySpace]);
+    kbSpace := Check (keySpace, KeyMap[keySpace]);
   end;
 
   function GetAsciiCode (c: Char): Char;

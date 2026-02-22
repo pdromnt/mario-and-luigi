@@ -1,12 +1,16 @@
 program Mario;
 
   { Mario game for the PC by Mike Wiering, 1994-95 }
-  { SDL2 port }
 
-  {$A+} {$B-} {$G+} {$I-} {$R-} {$S+} {$V-} {$X+}
-  {$APPTYPE GUI}
-  {$R mario.res}
+  {  web site: http://home.wxs.nl/~mike.wiering/mario/
+     e-mail:   mike.wiering@wxs.nl
+  }
 
+  { Compile with Borland Turbo Pascal 6/7 }
+
+  {$A+} {$B-} {$F-} {$G+} {$I-} {$N-} {$O-} {$R-} {$S+} {$V-} {$X+}
+
+  { $DEFINE DEBUG}  { halt the game by pressing mouse button }
   {$DEFINE MENU}
 
   uses
@@ -23,8 +27,8 @@ program Mario;
     Figures,
     Palettes,
     Txt,
-    Music,
-    sdl2;
+    Crt,
+    Dos;
 
   const
     NUM_LEV = 6;
@@ -33,21 +37,15 @@ program Mario;
     WAIT_BEFORE_DEMO = 500;
 
   type
-    {$A2}  { Word alignment (TP compatible) — needed for file compatibility }
-    SettingsData = record
+    ConfigData = record
       Sound: Boolean;
       SLine: Boolean;
+      Games: array[0..MAX_SAVE - 1] of GameData;
       UseJS: Boolean;
       JSDat: JoyRec;
     end;
 
-    SaveData = record
-      Games: array[0..MAX_SAVE - 1] of GameData;
-    end;
-    {$A+}  { Restore default alignment }
-
-    SettingsFile = file of SettingsData;
-    SaveFile = file of SaveData;
+    ConfigFile = file of ConfigData;
 
   var
     GameNumber: Integer;
@@ -56,17 +54,27 @@ program Mario;
     CurPlayer: Integer;
     Passed,
     EndGame: Boolean;
-    Settings: SettingsData;
-    Saves: SaveData;
+    Config: ConfigData;
 
-  {$I sprites\BLOCK000.inc}
+  {$IFDEF DEBUG}
+  {$F+}
+  procedure MouseHalt;
+  begin
+    Halt (255);
+  end;
+  {$F-}
 
-  {$I sprites\INTRO000.inc}
-  {$I sprites\INTRO001.inc}
-  {$I sprites\INTRO002.inc}
+  var MouseHaltAddr: Pointer;
+  {$ENDIF}
 
-  {$I sprites\START000.inc}
-  {$I sprites\START001.inc}
+  {$I Block.$00}
+
+  {$I Intro.$00}
+  {$I Intro.$01}
+  {$I Intro.$02}
+
+  {$I Start.$00}
+  {$I Start.$01}
 
   procedure NewData;
   begin
@@ -91,134 +99,94 @@ program Mario;
       Len: byte absolute S;
   begin
     S := ParamStr (0);
-    if Len >= 3 then
-    begin
-      S[Len - 2] := 'C';
-      S[Len - 1] := 'F';
-      S[Len - 0] := 'G';
-    end
-    else
-      S := 'MARIO.CFG';
+    S[Len - 2] := 'C';
+    S[Len - 1] := 'F';
+    S[Len - 0] := 'G';
     GetConfigName := S;
-  end;
-
-  function GetSaveName: string;
-    var
-      S: string;
-      Len: byte absolute S;
-  begin
-    S := ParamStr (0);
-    if Len >= 3 then
-    begin
-      S[Len - 2] := 'S';
-      S[Len - 1] := 'A';
-      S[Len - 0] := 'V';
-    end
-    else
-      S := 'MARIO.SAV';
-    GetSaveName := S;
   end;
 
   procedure ReadConfig;
     var
-      i: Integer;
-      FC: SettingsFile;
-      FS: SaveFile;
-      SettingsOK, SavesOK: Boolean;
+      i, j: Integer;
+      F: ConfigFile;
+      Name: string;
   begin
-    SettingsOK := FALSE;
-    SavesOK := FALSE;
-
   {$IFDEF MENU}
-    { Read settings (MARIO.CFG) }
-    Assign (FC, GetConfigName);
-    Reset (FC);
-    Read (FC, Settings);
-    Close (FC);
-    SettingsOK := IOResult = 0;
-
-    { Read save games (MARIO.SAV) }
-    Assign (FS, GetSaveName);
-    Reset (FS);
-    Read (FS, Saves);
-    Close (FS);
-    SavesOK := IOResult = 0;
+    Assign (F, GetConfigName);
+    Reset (F);
+    Read (F, Config);
+    Close (F);
+    if IOResult <> 0 then
   {$ENDIF}
-
-    if not SettingsOK then
     begin
-      with Settings do
+      NewData;
+      for i := 0 to MAX_SAVE - 1 do
+        Config.Games[i] := Data;
+      with Config do
       begin
         SLine := TRUE;
         Sound := TRUE;
         UseJS := FALSE;
       end;
-    end;
-
-    if not SavesOK then
-    begin
-      NewData;
-      for i := 0 to MAX_SAVE - 1 do
-        Saves.Games[i] := Data;
       GameNumber := -1;
     end;
 
-    with Settings do
+    with Config do
     begin
       Play.Stat := SLine;
       Buffers.BeeperSound := Sound;
     end;
+
+    Name := ParamStr (0);
+    j := 0;
+    if Length (Name) > 9 then
+      Delete (Name, 1, Length (Name) - 9);
+    for i := 1 to Length (Name) do
+      Inc (j, Ord (UpCase (Name[i])));
+    if j <> 648 then
+      RunError (201);
   end;
 
   procedure WriteConfig;
     var
-      FC: SettingsFile;
-      FS: SaveFile;
+      F: ConfigFile;
   begin
-    with Settings do
+    with Config do
     begin
       SLine := Play.Stat;
       Sound := Buffers.BeeperSound;
     end;
   {$IFDEF MENU}
-    { Write settings (MARIO.CFG) }
-    Assign (FC, GetConfigName);
-    ReWrite (FC);
+    Assign (F, GetConfigName);
+    ReWrite (F);
     if IOResult = 0 then
     begin
-      Write (FC, Settings);
-      Close (FC);
-    end;
-
-    { Write save games (MARIO.SAV) }
-    Assign (FS, GetSaveName);
-    ReWrite (FS);
-    if IOResult = 0 then
-    begin
-      Write (FS, Saves);
-      Close (FS);
+      Write (F, Config);
+      Close (F);
     end;
   {$ENDIF}
   end;
 
   procedure CalibrateJoystick;
   begin
-    SDL_Delay (100);
-    System.WriteLn ('Rotate joystick and press button');
-    System.WriteLn ('or press any key to use keyboard...');
-    SDL_Delay (100);
+    Delay (100);
+    WriteLn ('Rotate joystick and press button');
+    WriteLn ('or press any key to use keyboard...');
+    Delay (100);
     Key := #0;
     repeat
       Calibrate;
+      Write (#13, 'X = ', Byte (jsRight) - Byte (jsLeft): 2,
+                '  Y = ', Byte (jsDown) - Byte (jsUp): 2);
     until jsButton1 or jsButton2 or (Key <> #0);
-    System.WriteLn;
+    WriteLn;
     if (Key <> #0) then
     begin
       jsEnabled := FALSE;
       ReadJoystick;
     end;
-    Settings.UseJS := jsEnabled;
-    Settings.JSDat := jr;
+    Config.UseJS := jsEnabled;
+    Config.JSDat := jr;
     Key := #0;
   end;
 
@@ -255,8 +223,8 @@ program Mario;
     Turbo := FALSE;
     Data.Progress [plMario] := 5;
     PlayMacro;
-    PlayWorld (' ', ' ', Level_6a_Data, Options_6a_Data, Options_6a_Data,
-      Level_6b_Data, Options_6b_Data, Options_6b_Data, plMario);
+    PlayWorld (' ', ' ', @Level_6a^, @Options_6a^, @Options_6a^,
+      @Level_6b^, @Options_6b^, @Options_6b^, plMario);
     StopMacro;
   end;
 
@@ -324,8 +292,8 @@ program Mario;
       IntroDone := FALSE;
       NewData;
 
-      PlayWorld (#0, #0, Intro_0_Data, Options_0_Data, Options_0_Data,
-        Intro_0_Data, Options_0_Data, Options_0_Data, plMario);
+      PlayWorld (#0, #0, @Intro_0^, @Options_0^, @Options_0^,
+        @Intro_0^, @Options_0^, @Options_0^, plMario);
       InitBackGr (3, 0);
 
       OutPalette ($A0, 35, 45, 50);
@@ -346,9 +314,9 @@ program Mario;
           for j := 1 downto 0 do
             for k := 1 downto 0 do
             begin
-              DrawImage (38 + i + j, 29 + i + k, 108, 28, Intro000);
-              DrawImage (159 + i + j, 29 + i + k, 24, 28, Intro001);
-              DrawImage (198 + i + j, 29 + i + k, 84, 28, Intro002);
+              DrawImage (38 + i + j, 29 + i + k, 108, 28, @Intro000^);
+              DrawImage (159 + i + j, 29 + i + k, 24, 28, @Intro001^);
+              DrawImage (198 + i + j, 29 + i + k, 84, 28, @Intro002^);
             end;
 
         DrawBackGrMap (10 * H + 6, 11 * H - 1, 54, $A0);
@@ -357,7 +325,7 @@ program Mario;
         for i := 0 to NH - 1 do
           for j := 0 to NV - 1 do
             if (i in [0, NH - 1]) or (j in [0, NV - 1]) then
-              DrawImage (i * W, j * H, W, H, Block000);
+              DrawImage (i * W, j * H, W, H, @Block000^);
         DrawPlayer;
         ShowPage;
       end;
@@ -444,7 +412,7 @@ program Mario;
                  Menu[4] := '';
                  Menu[5] := '';
                  for i := 1 to 3 do
-                   with Saves.Games[i - 1] do
+                   with Config.Games[i - 1] do
                      if (Progress[plMario] = 0) and (Progress[plLuigi] = 0) then
                        Menu[i] := Menu[i] + 'EMPTY'
                      else
@@ -548,22 +516,22 @@ program Mario;
               ST_LOAD:
                 begin
                   GameNumber := Selected - 1;
-                  Saves.Games[GameNumber].NumPlayers := 1;
-                  with Saves.Games[GameNumber] do
+                  Config.Games[GameNumber].NumPlayers := 1;
+                  with Config.Games[GameNumber] do
                     if (Progress[plMario] = 0) and (Progress[plLuigi] = 0) then
                       Status := ST_NUMPLAYERS
                     else
                     begin
                       IntroDone := TRUE;
-                      NextNumPlayers := Saves.Games[GameNumber].NumPlayers;
+                      NextNumPlayers := Config.Games[GameNumber].NumPlayers;
                     end;
                 end;
 
               ST_ERASE:
                 begin
                   NewData;
-                  Saves.Games[Selected - 1] := Data;
-                  Saves.Games[Selected - 1].NumPlayers := 1;
+                  Config.Games[Selected - 1] := Data;
+                  Config.Games[Selected - 1].NumPlayers := 1;
                   GameNumber := -1;
                 end;
 
@@ -612,7 +580,7 @@ program Mario;
     until IntroDone and (not TestVGAMode);
 
     if GameNumber <> -1 then
-      Data := Saves.Games[GameNumber];
+      Data := Config.Games[GameNumber];
     Data.NumPlayers := NextNumPlayers;
   end;  { Intro }
 
@@ -632,12 +600,12 @@ program Mario;
         plMario:
           begin
             iW := 116;
-            DrawImage (160 - iW div 2, 85 - iH div 2, iW, iH, Start000);
+            DrawImage (160 - iW div 2, 85 - iH div 2, iW, iH, @Start000^);
           end;
         plLuigi:
           begin
             iW := 108;
-            DrawImage (160 - iW div 2, 85 - iH div 2, iW, iH, Start001);
+            DrawImage (160 - iW div 2, 85 - iH div 2, iW, iH, @Start001^);
           end;
       end;
       ShowPage;
@@ -653,20 +621,38 @@ program Mario;
 
 begin  { Mario }
   InitKeyBoard;
-  InitWorlds;
   Data.NumPlayers := 1;
   ReadConfig;
   ReadCmdLine;
 
-  jr := Settings.JSDat;
-  jsEnabled := jsDetected and Settings.UseJS;
+  jr := Config.JSDat;
+  jsEnabled := jsDetected and Config.UseJS;
+
+{$IFDEF DEBUG}
+  MouseHaltAddr := @MouseHalt;
+  asm
+      xor   ax, ax
+      int   33h
+      inc   ax
+      jnz   @End
+      mov   al, 0Ch
+      mov   cx, 0Ah
+      les   dx, MouseHaltAddr
+      int   33h
+    @End:
+  end;
+{$ENDIF}
+
+  if not DetectVga then
+  begin
+    System.WriteLn ('VGA graphics adapter required');
+    Halt (1)
+  end;
 
   ResetKeyBoard;
 
   if not InGraphicsMode then
     InitVGA;
-
-  InitAudio;  { Open SDL audio device for PC speaker emulation }
 
 {$IFDEF MENU}
   repeat
@@ -720,18 +706,18 @@ begin  { Mario }
             ShowPlayerName (CurPlayer);
          {$ENDIF}
             case Data.Progress [CurPlayer] mod NUM_LEV of
-              0: Passed := PlayWorld ('x', '1', Level_1a_Data, Options_1a_Data, Opt_1a_Data,
-                   Level_1b_Data, Options_1b_Data, Options_1b_Data, CurPlayer);
-              1: Passed := PlayWorld ('x', '2', Level_2a_Data, Options_2a_Data, Opt_2a_Data,
-                   Level_2b_Data, Options_2b_Data, Options_2b_Data, CurPlayer);
-              2: Passed := PlayWorld ('x', '3', Level_3a_Data, Options_3a_Data, Opt_3a_Data,
-                   Level_3b_Data, Options_3b_Data, Options_3b_Data, CurPlayer);
-              3: Passed := PlayWorld ('x', '4', Level_5a_Data, Options_5a_Data, Opt_5a_Data,
-                   Level_5b_Data, Options_5b_Data, Options_5b_Data, CurPlayer);
-              4: Passed := PlayWorld ('x', '5', Level_6a_Data, Options_6a_Data, Opt_6a_Data,
-                   Level_6b_Data, Options_6b_Data, Options_6b_Data, CurPlayer);
-              5: Passed := PlayWorld ('x', '6', Level_4a_Data, Options_4a_Data, Opt_4a_Data,
-                   Level_4b_Data, Options_4b_Data, Options_4b_Data, CurPlayer);
+              0: Passed := PlayWorld ('x', '1', @Level_1a^, @Options_1a^, @Opt_1a^,
+                   @Level_1b^, @Options_1b^, @Options_1b^, CurPlayer);
+              1: Passed := PlayWorld ('x', '2', @Level_2a^, @Options_2a^, @Opt_2a^,
+                   @Level_2b^, @Options_2b^, @Options_2b^, CurPlayer);
+              2: Passed := PlayWorld ('x', '3', @Level_3a^, @Options_3a^, @Opt_3a^,
+                   @Level_3b^, @Options_3b^, @Options_3b^, CurPlayer);
+              3: Passed := PlayWorld ('x', '4', @Level_5a^, @Options_5a^, @Opt_5a^,
+                   @Level_5b^, @Options_5b^, @Options_5b^, CurPlayer);
+              4: Passed := PlayWorld ('x', '5', @Level_6a^, @Options_6a^, @Opt_6a^,
+                   @Level_6b^, @Options_6b^, @Options_6b^, CurPlayer);
+              5: Passed := PlayWorld ('x', '6', @Level_4a^, @Options_4a^, @Opt_4a^,
+                   @Level_4b^, @Options_4b^, @Options_4b^, CurPlayer);
               else
                 EndGame := TRUE;
             end;
@@ -752,7 +738,7 @@ begin  { Mario }
       (Data.Lives [plMario] + Data.Lives [plLuigi] = 0);
 
     if GameNumber <> -1 then
-      Saves.Games[GameNumber] := Data;
+      Config.Games[GameNumber] := Data;
 
 {$IFDEF MENU}
   until QuitGame;

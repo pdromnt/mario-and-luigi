@@ -8,7 +8,8 @@ interface
     Buffers,
     Glitter,
     Figures,
-    Music;
+    Music,
+    Crt;
 
   const
     tpBroken = 1;
@@ -37,13 +38,13 @@ interface
 
 implementation
 
-  {$I sprites\PART000.inc}
-  {$I sprites\COIN000.inc}
-  {$I sprites\QUEST000.inc}
-  {$I sprites\QUEST001.inc}
-  {$I sprites\WHHIT000.inc}
-  {$I sprites\WHFIRE000.inc}
-  {$I sprites\NOTE000.inc}
+  {$I Part.$00}
+  {$I Coin.$00}
+  {$I Quest.$00}
+  {$I Quest.$01}
+  {$I WHHit.$00}
+  {$I WHFire.$00}
+  {$I Note.$00}
 
   const
     MaxTempObj = 20;
@@ -54,6 +55,7 @@ implementation
       Alive: Boolean;
       Visible: Array [0 .. MAX_PAGE] of Boolean;
       Tp: Byte;
+    {  BackGrBuffer: Array [0 .. MAX_PAGE] of ImageBuffer; }
       BackGrAddr: array [0 .. MAX_PAGE] of Word;
       XPos,
       YPos,
@@ -100,6 +102,7 @@ implementation
   begin
     with TempObj [i] do
     begin
+     { GetImage (XPos, YPos, HSize, VSize, BackGrBuffer [WorkingPage]); }
       BackGrAddr [CurrentPage] := PushBackGr (XPos, YPos, HSize + 4, VSize);
       OldX [CurrentPage] := XPos;
       OldY [CurrentPage] := YPos;
@@ -167,15 +170,15 @@ implementation
           ReadBackGr (i);
           case Tp of
             tpBroken:
-              DrawImage (XPos, YPos, HSize, VSize, Part000);
+              DrawImage (XPos, YPos, HSize, VSize, @Part000^);
             tpCoin:
-              DrawImage (XPos, YPos, HSize, VSize, Coin000);
+              DrawImage (XPos, YPos, HSize, VSize, @Coin000^);
             tpHit:
-              DrawImage (XPos, YPos, HSize, VSize, WHHit000);
+              DrawImage (XPos, YPos, HSize, VSize, @WHHit000^);
             tpFire:
-              DrawImage (XPos, YPos, HSize, VSize, WHFire000);
+              DrawImage (XPos, YPos, HSize, VSize, @WHFire000^);
             tpNote:
-              DrawImage (XPos, YPos, HSize, VSize, Note000);
+              DrawImage (XPos, YPos, HSize, VSize, @Note000^);
           end;
           Visible [CurrentPage] := True;
         end;
@@ -189,7 +192,10 @@ implementation
       with TempObj [i] do
         if Visible [CurrentPage] then
         begin
-          PopBackGr (BackGrAddr [CurrentPage]);
+         { PutImage (OldX [WorkingPage], OldY [WorkingPage],
+            HSize, VSize, BackGrBuffer [WorkingPage]); }
+          PopBackGr ({OldX [WorkingPage], OldY [WorkingPage],
+            HSize + 4, VSize,} BackGrAddr [CurrentPage]);
           Visible [CurrentPage] := False;
         end;
   end;
@@ -271,9 +277,9 @@ implementation
       begin
         case NewImage of
           0: DrawBackGrBlock (RemX, RemY, RemW, RemH);
-          1: DrawImage (RemX, RemY, RemW, RemH, Quest001);
-          2: DrawImage (RemX, RemY, RemW, RemH, Quest000);
-          5: DrawImage (RemX, RemY, RemW, RemH, Note000);
+          1: DrawImage (RemX, RemY, RemW, RemH, @Quest001^);
+          2: DrawImage (RemX, RemY, RemW, RemH, @Quest000^);
+          5: DrawImage (RemX, RemY, RemW, RemH, @Note000^);
         end;
         Dec (RemCount);
         if RemCount < 1 then
@@ -316,6 +322,7 @@ implementation
       CoinGlitter (X, Y);
     end;
     Beep (2420);
+  {  StartMusic (CoinMusic); }
     Inc (Data.Coins [Player]);
     AddScore (50);
     if Data.Coins [Player] mod 100 = 0 then

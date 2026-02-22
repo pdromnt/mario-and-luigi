@@ -1,12 +1,10 @@
 unit Music;
 
-  {  SDL2 replacement for PC speaker music  }
-  {  Original (C) Copyright 1994-2001, Mike Wiering  }
-
 interface
 
   uses
-    Buffers;
+    Buffers,
+    Crt;
 
   const
     c0 = #01; d0 = #03; e0 = #05; f0 = #06; g0 = #08; a0 = #10; b0 = #12;
@@ -38,20 +36,12 @@ interface
   procedure PlayMusic;
   procedure StopMusic;
   procedure PauseMusic;
-  procedure InitAudio;
-  procedure CloseAudio;
 
 implementation
-
-  uses
-    sdl2, ctypes;
 
   const
     HALF_NOTE = 1.059463094;  { HALF_NOTE ^ 12 = 2 }
     MAX_OCT = 7;
-    SAMPLE_RATE = 44100;
-    AUDIO_BUFFER_SIZE = 1024;
-    SQUARE_WAVE_AMPLITUDE = 4000;
 
   var
     rTmp: Real;
@@ -60,96 +50,11 @@ implementation
     sMusic: String;
     iPos: Integer;
 
-    { SDL audio state }
-    AudioDev: TSDL_AudioDeviceID;
-    AudioOpened: Boolean;
-
-    { Track the currently sustaining music note frequency.
-      On the original PC speaker, Sound(freq) kept the speaker buzzing
-      until NoSound was called.  PlayMusic only called Sound when a note
-      started and NoSound between notes.  We must re-assert the frequency
-      each frame while a note's duration is counting down. }
-    MusicFreq: Integer;
-
-  { Audio callback phase tracking }
-  var
-    SamplePhase: Double;
-
-  procedure AudioCallback(userdata: Pointer; stream: pcuint8; len: cint); cdecl;
-  var
-    Samples: PSmallInt;
-    NumSamples: Integer;
-    idx: Integer;
-    Freq: Integer;
-    Period: Double;
-    Sample: SmallInt;
-  begin
-    Samples := PSmallInt(stream);
-    NumSamples := len div 2;  { 16-bit samples = 2 bytes each }
-    Freq := AudioFrequency;  { Read from Buffers shared variable }
-
-    if Freq <= 0 then
-    begin
-      FillChar(stream^, len, #0);
-      Exit;
-    end;
-
-    Period := SAMPLE_RATE / Freq;
-
-    for idx := 0 to NumSamples - 1 do
-    begin
-      if SamplePhase < Period / 2.0 then
-        Sample := SQUARE_WAVE_AMPLITUDE
-      else
-        Sample := -SQUARE_WAVE_AMPLITUDE;
-
-      Samples[idx] := Sample;
-
-      SamplePhase := SamplePhase + 1.0;
-      if SamplePhase >= Period then
-        SamplePhase := SamplePhase - Period;
-    end;
-  end;
-
-  procedure InitAudio;
-  var
-    Desired, Obtained: TSDL_AudioSpec;
-  begin
-    if AudioOpened then Exit;
-
-    FillChar(Desired, SizeOf(Desired), 0);
-    Desired.freq := SAMPLE_RATE;
-    Desired.format := AUDIO_S16SYS;
-    Desired.channels := 1;
-    Desired.samples := AUDIO_BUFFER_SIZE;
-    Desired.callback := TSDL_AudioCallback(@AudioCallback);
-    Desired.userdata := nil;
-
-    AudioDev := SDL_OpenAudioDevice(nil, 0, @Desired, @Obtained, 0);
-    if AudioDev > 1 then
-    begin
-      AudioOpened := True;
-      SDL_PauseAudioDevice(AudioDev, 0);  { Start playback }
-    end
-    else
-      AudioOpened := False;
-  end;
-
-  procedure CloseAudio;
-  begin
-    if AudioOpened then
-    begin
-      SDL_CloseAudioDevice(AudioDev);
-      AudioOpened := False;
-    end;
-  end;
-
   procedure StartMusic (S: String);
   begin
     if not BeeperSound then Exit;
     sMusic := S;
     iPos := 1;
-    MusicFreq := 0;
   end;
 
   procedure PlayMusic;
@@ -157,95 +62,41 @@ implementation
       c: Char;
   begin
     if not BeeperSound then Exit;
-
-    { If a sound effect Beep() was just called this frame (BeepAge=1),
-      don't touch AudioFrequency — let it survive one full frame so
-      the SDL audio callback can pick it up and produce audible samples.
-      Advance BeepAge so we can overwrite it next frame. }
-    if BeepAge = 1 then
-    begin
-      BeepAge := 2;
-      { Still advance the music sequence timing so it stays in sync }
-      if (iPos > 0) and (iPos <= Length(sMusic)) then
-      begin
-        c := sMusic[iPos];
-        if c > #1 then
-          sMusic[iPos] := Pred(c)
-        else
-        begin
-          Inc(iPos);
-          if (iPos <= Length(sMusic)) then
-          begin
-            c := sMusic[iPos];
-            if c > #0 then
-              MusicFreq := aiNote[Ord(c)]
-            else
-              MusicFreq := 0;
-          end;
-          Inc(iPos);
-        end;
-      end;
-      Exit;  { Keep the beep frequency playing }
-    end;
-
-    BeepAge := 0;
-    AudioFrequency := 0;
-
-    if (iPos = 0) or (iPos > Length(sMusic)) then
+    NoSound;
+    if (iPos = 0) or (iPos > Length (sMusic)) then
       Exit;
     c := sMusic[iPos];
     if c > #1 then
-    begin
-      { Duration counting down — keep the current note sounding.
-        On the real PC speaker the note was still buzzing from the
-        original Sound() call; we must re-assert it each frame. }
-      sMusic[iPos] := Pred(c);
-      AudioFrequency := MusicFreq;
-    end
+      sMusic[iPos] := Pred (c)
     else
     begin
-      { Duration expired (reached #1) — advance to next note }
-      Inc(iPos);
+      Inc (iPos);
       c := sMusic[iPos];
       if c > #0 then
-      begin
-        MusicFreq := aiNote[Ord(c)];
-        Beep(MusicFreq);
-        BeepAge := 0;  { Music notes don't need SFX protection }
-      end
-      else
-        MusicFreq := 0;  { end of music }
-      Inc(iPos);
+        Beep (aiNote[Ord (c)]);
+      Inc (iPos);
     end;
   end;
 
   procedure StopMusic;
   begin
-    AudioFrequency := 0;
-    MusicFreq := 0;
-    BeepAge := 0;
+    NoSound;
     sMusic := '';
     iPos := 0;
   end;
 
   procedure PauseMusic;
   begin
-    AudioFrequency := 0;
+    NoSound;
   end;
 
 begin
-  { Initialize note frequency table }
   rTmp := HALF_NOTE * 55;
   for i := 1 to MAX_OCT * 12 do
   begin
-    aiNote[i] := Round(rTmp);
+    aiNote[i] := Round (rTmp);
     rTmp := rTmp * HALF_NOTE;
   end;
   sMusic := '';
   iPos := 0;
-  MusicFreq := 0;
-  BeepAge := 0;
-  SamplePhase := 0;
-  AudioOpened := False;
-  AudioDev := 0;
 end.

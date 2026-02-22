@@ -78,8 +78,7 @@ implementation
   uses
     VGA256;
 
-  { Include the extracted palette data as a typed constant }
-  {$I data\mpal256.inc}
+  {$I MPAL256.}
 
   var
     FadingUp,
@@ -137,7 +136,7 @@ implementation
   procedure Fade;
   var
     TempPal: PalType;
-    i, j: Integer;
+    i, j, k: Integer;
   begin
     if FadingUp or FadingDown then
     begin
@@ -182,9 +181,9 @@ implementation
             TempPal [i, j] := Palette [i, j] - k
           else
             TempPal [i, j] := 0;
-      ReadPalette (TempPal);
-      PresentFrame;
+      WaitDisplay;
       WaitRetrace;
+      ReadPalette (TempPal);
     end;
   end;
 
@@ -203,9 +202,9 @@ implementation
             TempPal [i, j] := Palette [i, j] - k
           else
             TempPal [i, j] := 0;
-      ReadPalette (TempPal);
-      PresentFrame;
+      WaitDisplay;
       WaitRetrace;
+      ReadPalette (TempPal);
     end;
   end;
 
@@ -330,8 +329,8 @@ implementation
   end;
 
   procedure OutPalette (Color, Red, Green, Blue: Byte);
-  var
-    i: Integer;
+    var
+      i, j, k: Integer;
   begin
     if ModifyPalette then
     begin
@@ -358,7 +357,18 @@ implementation
       end;
     end;
     if not LockPalette then
-      VGA256.SetPalette(Color, Red, Green, Blue);
+    asm
+          mov     dx, 03C8h       { DAC Write Address Register }
+          mov     al, Color
+          out     dx, al
+          inc     dx
+          mov     al, Red
+          out     dx, al
+          mov     al, Green
+          out     dx, al
+          mov     al, Blue
+          out     dx, al
+    end;
   end;
 
   procedure LockPal;
@@ -372,8 +382,8 @@ implementation
   end;
 
   procedure RefreshPalette (var P: PalType);
-  var
-    i: Integer;
+    var
+      i: Integer;
   begin
     ModifyPalette := FALSE;
     for i := 0 to 255 do
@@ -382,5 +392,5 @@ implementation
   end;
 
 begin
-  P256 := @Pal256Data;
+  P256 := @Pal256;
 end.

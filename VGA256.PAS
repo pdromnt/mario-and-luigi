@@ -1,16 +1,23 @@
 unit VGA256;
 
-  {  SDL2 replacement for the Turbo Pascal VGA unit  }
-  {  Original (C) Copyright 1994-2001, Mike Wiering   }
-  {  SDL2 port preserves the identical interface       }
+  {  (C) Copyright 1994-2001, Mike Wiering, e-mail: mike.wiering@wxs.nl  }
+
+  {
+     Turbo Pascal VGA unit (Mode 13h, 320x200 256 colors), designed
+     for side-scrolling games, uses planar mode, page-flipping (2 pages),
+     statusline
+  }
+
+  {$DEFINE DEBUG}
 
   {$R-}  { no range-checking }
   {$I-}  { no I/O-checking }
+  {$G+}  { allow 286 instructions }
 
 interface
 
   const
-    VGA_SEGMENT           = $A000;  { kept for source compatibility }
+    VGA_SEGMENT           = $A000;
 
     WINDOWHEIGHT        = 13 * 14;
     WINDOWWIDTH         = 16 * 20;
@@ -20,9 +27,8 @@ interface
 
     VIR_SCREEN_WIDTH    = SCREEN_WIDTH + 2 * 20;
     VIR_SCREEN_HEIGHT   = 182;
-    BYTES_PER_LINE      = VIR_SCREEN_WIDTH div 4;  { kept for compatibility }
+    BYTES_PER_LINE      = VIR_SCREEN_WIDTH div 4;
 
-    { VGA register constants - kept for source compatibility but unused }
     MISC_OUTPUT         = $03C2;
     SC_INDEX            = $03C4;
     GC_INDEX            = $03CE;
@@ -88,209 +94,203 @@ interface
   procedure PopBackGr (Address: Word);
   procedure DrawBitmap (X, Y: Integer; var BitMap; Attr: Byte);
 
-  { New SDL-specific exports for other units }
-  procedure PollEvents;
-  procedure PresentFrame;
-  function IsQuitRequested: Boolean;
-
   const
     InGraphicsMode: Boolean = FALSE;
 
-  const
-    { Total framebuffer height: must be at least YBASE + SCREEN_HEIGHT = 209 }
-    FB_HEIGHT = YBASE + SCREEN_HEIGHT;  { 9 + 200 = 209 rows }
-
-  { Framebuffer exposed for direct access by Stars, BackGr, etc. }
-  var
-    FrameBuffer: array[0..MAX_PAGE] of
-      array[0..VIR_SCREEN_WIDTH * FB_HEIGHT - 1] of Byte;
-
 implementation
 
-  uses
-    sdl2, Keyboard;
-
-  const
-    SCALE_FACTOR = 3;  { Window is 960x546 (320x3 x 182x3) }
-    FRAME_TIME   = 14; { ~71 fps in ms — matches original DOS speed }
-
   var
-    SDLWindow: PSDL_Window;
-    SDLRenderer: PSDL_Renderer;
-    RenderTexture: PSDL_Texture;
-    PixelBuffer: array[0..SCREEN_WIDTH * VIR_SCREEN_HEIGHT - 1] of UInt32;
-    QuitRequested: Boolean;
-    LastFrameTime: UInt32;
-
-  { SDL palette: stored as VGA 6-bit values (0-63) }
-  var
-    PaletteR: array[0..255] of Byte;
-    PaletteG: array[0..255] of Byte;
-    PaletteB: array[0..255] of Byte;
+    OldExitProc: Pointer;
+    OldScreenMode: Byte;
 
   const
     XView: Integer = 0;
     YView: Integer = 0;
 
     Page: Integer = 0;
-    PageOffset: Word = 0;  { kept for GetPageOffset compatibility }
+    PageOffset: Word = 0;
 
     YOffset: Integer = 0;
-    YStart: Integer = 0;
-    YEnd: Integer = SCREEN_HEIGHT;
 
-  { Background save/restore stack }
-  const
-    MAX_BACKGR_STACK = 256;
+    SAFE = 34 * BYTES_PER_LINE;
 
-  type
-    PBackGrData = ^TBackGrData;
-    TBackGrData = array[0..65519] of Byte;
-
-    TBackGrEntry = record
-      X, Y, W, H: Integer;
-      Data: PBackGrData;
-      DataSize: Word;
-      Valid: Boolean;
-    end;
-
-  var
-    BackGrStacks: array[0..MAX_PAGE] of array[0..MAX_BACKGR_STACK - 1] of TBackGrEntry;
-    StackTops: array[0..MAX_PAGE] of Integer;
+    Stack: array[0..MAX_PAGE] of Word =
+      (PAGE_0 + PAGE_SIZE + SAFE,
+       PAGE_1 + PAGE_SIZE + SAFE);
 
 
-  { ===== SDL Initialization ===== }
-
-  function DetectVGA: Boolean;
+  {$F+}
+  procedure NewExitProc;
+    { Be sure to return to textmode if program is halted }
   begin
-    DetectVGA := True;  { Always available with SDL }
+    OldMode;
+    ExitProc := OldExitProc;
   end;
+  {$F-}
 
   function GetMode: Byte;
+    { Get video mode }
   begin
-    if InGraphicsMode then
-      GetMode := $13
-    else
-      GetMode := $03;
+    asm
+        push    bp
+        mov     ah, 0Fh
+        int     10h
+        mov     @Result, al
+        pop     bp
+    end;
   end;
 
   procedure SetMode (NewMode: Byte);
+    { Set video mode }
   begin
-    { No-op in SDL - mode is always 320x200 }
+    asm
+        push    bp
+        xor     ah, ah
+        mov     al, NewMode
+        int     10h
+        pop     bp
+    end;
+  end;
+
+  procedure SetWidth (NewWidth: Word);
+    { Set screen width (NewWidth >= 40) }
+  begin
+    asm
+        mov     ax, NewWidth
+        push    ax
+        mov     dx, CRTC_INDEX
+        mov     ax, 13h
+        out     dx, al
+        pop     ax
+        inc     dx
+        out     dx, al
+    end;
+  end;
+
+  function DetectVGA: Boolean;
+    var
+      VGADetected: Boolean;
+  begin
+    VGADetected := False;
+    asm
+        push    bp
+        mov     ax, 1A00h
+        int     10h
+        cmp     al, 1Ah
+        jnz     @NoVGA
+        inc     VGADetected
+    @NoVGA:
+        pop     bp
+    end;
+    DetectVGA := VGADetected;
   end;
 
   procedure InitVGA;
-  var
-    i: Integer;
+    { Start graphics mode 320x200 256 colors }
   begin
-    if InGraphicsMode then
-      Exit;
-
-    if SDL_Init(SDL_INIT_VIDEO or SDL_INIT_AUDIO or SDL_INIT_JOYSTICK or SDL_INIT_TIMER) < 0 then
-    begin
-      WriteLn('SDL_Init failed: ', SDL_GetError);
-      Halt(1);
-    end;
-
-    SDLWindow := SDL_CreateWindow('Mario & Luigi',
-      SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-      SCREEN_WIDTH * SCALE_FACTOR, VIR_SCREEN_HEIGHT * SCALE_FACTOR,
-      SDL_WINDOW_SHOWN);
-    if SDLWindow = nil then
-    begin
-      WriteLn('SDL_CreateWindow failed: ', SDL_GetError);
-      Halt(1);
-    end;
-
-    SDLRenderer := SDL_CreateRenderer(SDLWindow, -1,
-      SDL_RENDERER_ACCELERATED or SDL_RENDERER_PRESENTVSYNC);
-    if SDLRenderer = nil then
-      SDLRenderer := SDL_CreateRenderer(SDLWindow, -1, SDL_RENDERER_SOFTWARE);
-    if SDLRenderer = nil then
-    begin
-      WriteLn('SDL_CreateRenderer failed: ', SDL_GetError);
-      Halt(1);
-    end;
-
-    SDL_RenderSetLogicalSize(SDLRenderer, SCREEN_WIDTH, VIR_SCREEN_HEIGHT);
-    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, '0');  { nearest-neighbor }
-
-    RenderTexture := SDL_CreateTexture(SDLRenderer,
-      SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING,
-      SCREEN_WIDTH, VIR_SCREEN_HEIGHT);
-    if RenderTexture = nil then
-    begin
-      WriteLn('SDL_CreateTexture failed: ', SDL_GetError);
-      Halt(1);
-    end;
-
-    { Clear everything }
     ClearPalette;
+    SetMode ($13);
+    ClearPalette;
+    SetWidth (BYTES_PER_LINE shr 1);
+    asm
+        mov     dx, SC_INDEX
+        mov     al, MEMORY_MODE
+        out     dx, al
+        inc     dx
+        in      al, dx
+        and     al, not 8
+        or      al, 4
+        out     dx, al
+        mov     dx, GC_INDEX
+        mov     al, GRAPHICS_MODE
+        out     dx, al
+        inc     dx
+        in      al, dx
+        and     al, not 10h
+        out     dx, al
+        dec     dx
+        mov     al, MISCELLANEOUS
+        out     dx, al
+        inc     dx
+        in      al, dx
+        and     al, not 2
+        out     dx, al
+    end;
     ClearVGAMem;
-    ResetStack;
-
-    Page := 0;
-    PageOffset := PAGE_0;
-    XView := 0;
-    YView := 0;
-    YOffset := 0;
-    YStart := 0;
-    YEnd := SCREEN_HEIGHT;
-    QuitRequested := False;
-    LastFrameTime := SDL_GetTicks;
-
-    InGraphicsMode := True;
+    asm
+        mov     dx, CRTC_INDEX
+        mov     al, UNDERLINE
+        out     dx, al
+        inc     dx
+        in      al, dx
+        and     al, not 40h
+        out     dx, al
+        dec     dx
+        mov     al, MODE_CONTROL
+        out     dx, al
+        inc     dx
+        in      al, dx
+        or      al, 40h
+        out     dx, al
+    end;
+    if not InGraphicsMode then
+    begin
+      OldExitProc := ExitProc;
+      ExitProc := @NewExitProc;
+    end;
+    InGraphicsMode := TRUE;
   end;
 
   procedure OldMode;
+    { Return to the original screenmode }
   begin
-    if not InGraphicsMode then
-      Exit;
-
-    InGraphicsMode := False;
-
-    if RenderTexture <> nil then
+    if InGraphicsMode then
     begin
-      SDL_DestroyTexture(RenderTexture);
-      RenderTexture := nil;
+      ClearVGAMem;
+      ClearPalette;
+      ShowPage;
     end;
-    if SDLRenderer <> nil then
-    begin
-      SDL_DestroyRenderer(SDLRenderer);
-      SDLRenderer := nil;
-    end;
-    if SDLWindow <> nil then
-    begin
-      SDL_DestroyWindow(SDLWindow);
-      SDLWindow := nil;
-    end;
-
-    SDL_Quit;
+    SetMode (OldScreenMode);
+    InGraphicsMode := FALSE;
+    ExitProc := OldExitProc;
   end;
-
-
-  { ===== Frame Buffer Operations ===== }
 
   procedure ClearVGAMem;
   begin
-    FillChar(FrameBuffer, SizeOf(FrameBuffer), 0);
+    asm
+        push    es
+        mov     dx, SC_INDEX
+        mov     ax, 0F00h + MAP_MASK
+        out     dx, ax
+        mov     ax, VGA_SEGMENT
+        mov     es, ax
+        xor     ax, ax
+        mov     di, ax
+        mov     cx, 8000h
+        cld
+        rep     stosw
+        pop     es
+    end;
   end;
 
   procedure WaitDisplay;
   begin
-    { No-op - retrace sync handled by PresentFrame }
+    asm
+          mov     dx, VERT_RESCAN
+  @1:     in      al, dx
+          test    al, VERT_RETRACE_MASK
+          jnz     @1
+    end;
   end;
 
   procedure WaitRetrace;
-  var
-    Now, Elapsed: UInt32;
   begin
-    { Frame timing to approximate 60 Hz }
-    Now := SDL_GetTicks;
-    Elapsed := Now - LastFrameTime;
-    if Elapsed < FRAME_TIME then
-      SDL_Delay(FRAME_TIME - Elapsed);
-    LastFrameTime := SDL_GetTicks;
+    asm
+          mov     dx, VERT_RESCAN
+  @1:     in      al, dx
+          test    al, VERT_RETRACE_MASK
+          jz      @1
+    end;
   end;
 
   procedure SetView (X, Y: Integer);
@@ -299,71 +299,54 @@ implementation
     YView := Y;
   end;
 
-  procedure PresentFrame;
-  var
-    SrcX, SrcY: Integer;
-    DispPage: Integer;
-    i, j, Idx, FBIdx: Integer;
-    WrapX: Integer;
-    c: Byte;
-    r, g, b: UInt32;
-  begin
-    if not InGraphicsMode then Exit;
-    if RenderTexture = nil then Exit;
-
-    { ShowPage calls PresentFrame BEFORE SwapPages, so Page is still
-      the page that was just drawn to. Display that page. }
-    DispPage := Page;
-
-    SrcX := XView;
-    SrcY := YView;  { Do NOT add YOffset; game content is drawn at YOffset rows down,
-                       creating natural top border like VGA CRTC blanking did }
-
-    { Bounds checking }
-    if SrcX < 0 then SrcX := 0;
-    if SrcY < 0 then SrcY := 0;
-
-    { Convert indexed framebuffer to ARGB8888.
-      Only render VIR_SCREEN_HEIGHT (182) rows — window is sized to match. }
-    for j := 0 to VIR_SCREEN_HEIGHT - 1 do
-    begin
-      for i := 0 to SCREEN_WIDTH - 1 do
-      begin
-        Idx := j * SCREEN_WIDTH + i;
-
-        { Wrap X coordinate like VGA CRTC does }
-        WrapX := (SrcX + i) mod VIR_SCREEN_WIDTH;
-        FBIdx := (SrcY + j) * VIR_SCREEN_WIDTH + WrapX;
-
-        { Bounds check framebuffer access }
-        if (SrcY + j >= 0) and (SrcY + j < FB_HEIGHT) then
-          c := FrameBuffer[DispPage, FBIdx]
-        else
-          c := 0;
-
-        { Convert VGA 6-bit palette to 8-bit and pack as ARGB }
-        r := UInt32(PaletteR[c]) shl 2;
-        g := UInt32(PaletteG[c]) shl 2;
-        b := UInt32(PaletteB[c]) shl 2;
-        if r > 255 then r := 255;
-        if g > 255 then g := 255;
-        if b > 255 then b := 255;
-        PixelBuffer[Idx] := $FF000000 or (r shl 16) or (g shl 8) or b;
-      end;
-    end;
-
-    SDL_UpdateTexture(RenderTexture, nil, @PixelBuffer[0], SCREEN_WIDTH * 4);
-    SDL_RenderClear(SDLRenderer);
-    SDL_RenderCopy(SDLRenderer, RenderTexture, nil, nil);
-    SDL_RenderPresent(SDLRenderer);
-  end;
-
   procedure SetViewport (X, Y: Integer; PageNr: Byte);
+    { Set the offset of video memory }
+  var
+    i: Integer;
   begin
-    XView := X;
-    YView := Y;
-    { In the original this programmed CRTC registers. }
-    { In SDL we just store the values and use them in PresentFrame. }
+    asm
+          cli
+
+          mov     dx, VERT_RESCAN               { wait for display }
+  @1:     in      al, dx
+          test    al, VERT_RETRACE_MASK
+          jnz     @1
+
+          shl     X, 1
+          shl     Y, 1
+          mov     ax, Y
+          mov     bx, BYTES_PER_LINE / 2
+          mul     bx
+          mov     bx, X
+          mov     cl, 3
+          shr     bx, cl
+          add     bx, ax
+          mov     al, START_ADDRESS_HIGH
+          mov     ah, PageNr
+          ror     ah, 1
+          add     ah, bh
+          mov     dx, CRTC_INDEX
+          out     dx, ax
+          mov     al, START_ADDRESS_LOW
+          mov     ah, bl
+          out     dx, ax
+
+          mov     dx, VERT_RESCAN               { wait for retrace }
+  @2:     in      al, dx
+          test    al, VERT_RETRACE_MASK
+          jz      @2
+
+          mov     ax, X
+          and     ax, 7
+          add     al, 10h
+          mov     dx, 3c0h
+          mov     ah, al
+          mov     al, 33h
+          out     dx, al
+          xchg    ah, al
+          out     dx, al
+          sti
+    end;
   end;
 
   procedure SwapPages;
@@ -381,43 +364,42 @@ implementation
   end;
 
   procedure ShowPage;
-  var
-    Now, Elapsed: UInt32;
   begin
-    SetViewport(XView, YView, Page);
-    PresentFrame;
-    PollKeyboard;  { Process SDL events -> update key states }
-
-    { Enforce frame timing: the original game ran at ~60fps on DOSBox
-      at 9000 cycles. Without this delay, the SDL port runs far too fast
-      because modern CPUs blaze through the game logic in microseconds. }
-    Now := SDL_GetTicks;
-    Elapsed := Now - LastFrameTime;
-    if Elapsed < FRAME_TIME then
-      SDL_Delay(FRAME_TIME - Elapsed);
-    LastFrameTime := SDL_GetTicks;
-
+    SetViewport (XView, YView, Page);
     SwapPages;
   end;
 
   procedure Border (Attr: Byte);
+    { Draw a border around the screen }
   begin
-    { Set the renderer clear color to the border/overscan color }
-    if SDLRenderer <> nil then
-      SDL_SetRenderDrawColor(SDLRenderer,
-        PaletteR[Attr] shl 2,
-        PaletteG[Attr] shl 2,
-        PaletteB[Attr] shl 2, 255);
+    asm
+          push    bp
+          mov     ax, 1001h
+          mov     bh, Attr
+          int     10h
+          pop     bp
+    end;
   end;
 
   procedure SetYStart (NewYStart: Integer);
   begin
-    YStart := NewYStart;
+    asm
+          mov     dx, CRTC_INDEX
+          mov     al, 16h
+          mov     ah, Byte Ptr [NewYStart]
+          and     ah, 7Fh
+          out     dx, ax
+    end;
   end;
 
   procedure SetYEnd (NewYEnd: Integer);
   begin
-    YEnd := NewYEnd;
+    asm
+          mov     dx, CRTC_INDEX
+          mov     al, 15h
+          mov     ah, Byte Ptr [NewYEnd]
+          out     dx, ax
+    end;
   end;
 
   procedure SetYOffset (NewYOffset: Integer);
@@ -430,298 +412,835 @@ implementation
     GetYOffset := YOffset;
   end;
 
-
-  { ===== Pixel Operations ===== }
-
   procedure PutPixel (X, Y: Integer; Attr: Byte);
-  var
-    Offs: LongInt;
-    WX: Integer;
+    { Draw a single pixel at (X, Y) with color Attr }
   begin
-    if (Y >= 0) and (Y < FB_HEIGHT) then
-    begin
-      WX := X mod VIR_SCREEN_WIDTH;
-      if WX < 0 then Inc(WX, VIR_SCREEN_WIDTH);
-      Offs := LongInt(Y) * VIR_SCREEN_WIDTH + WX;
-      FrameBuffer[Page, Offs] := Attr;
+    asm
+        push    es
+        mov     ax, VGA_SEGMENT
+        mov     es, ax
+        mov     dx, Y
+        mov     ax, BYTES_PER_LINE
+        mul     dx
+        mov     cx, X
+        push    cx
+        shr     cx, 1
+        shr     cx, 1
+        add     ax, cx
+        mov     di, ax
+        add     di, PageOffset
+        pop     cx
+        and     cl, 3
+        mov     ah, 1
+        shl     ah, cl
+        mov     al, MAP_MASK
+        mov     dx, SC_INDEX
+        out     dx, ax
+        mov     al, Attr
+        stosb
+        pop     es
     end;
   end;
 
   function GetPixel (X, Y: Integer): Byte;
-  var
-    Offs: LongInt;
-    WX: Integer;
+    { Get color of pixel at (X, Y) }
   begin
-    if (Y >= 0) and (Y < FB_HEIGHT) then
-    begin
-      WX := X mod VIR_SCREEN_WIDTH;
-      if WX < 0 then Inc(WX, VIR_SCREEN_WIDTH);
-      Offs := LongInt(Y) * VIR_SCREEN_WIDTH + WX;
-      GetPixel := FrameBuffer[Page, Offs];
-    end
-    else
-      GetPixel := 0;
+    asm
+        push    es
+        mov     ax, VGA_SEGMENT
+        mov     es, ax
+        mov     dx, Y
+        mov     ax, BYTES_PER_LINE
+        mul     dx
+        mov     cx, X
+        push    cx
+        shr     cx, 1
+        shr     cx, 1
+        add     ax, cx
+        mov     si, ax
+        add     si, PageOffset
+        pop     ax
+        and     al, 3
+        mov     ah, al
+        mov     al, READ_MAP
+        mov     dx, GC_INDEX
+        out     dx, ax
+        seges   mov al, [si]
+        pop     es
+        mov     @Result, al
+    end;
   end;
 
-
-  { ===== Image Drawing Operations ===== }
-
   procedure DrawImage (XPos, YPos, Width, Height: Integer; var BitMap);
-    { Draw an image - zero bytes (transparent) are skipped }
-  var
-    Src: PByte;
-    i, j: Integer;
-    c: Byte;
-    WX: Integer;
-    Offs: LongInt;
+    { Draw an image on the screen (NULL-bytes are ignored) }
   begin
-    if Height <= 0 then Exit;
-    if Width <= 0 then Exit;
-    if YPos >= FB_HEIGHT then Exit;
-    if (YPos < 0) and (YPos + Height <= 0) then Exit;
+    asm
+        push    ds
 
-    Src := @BitMap;
-    for j := 0 to Height - 1 do
-    begin
-      if (YPos + j >= 0) and (YPos + j < FB_HEIGHT) then
-      begin
-        for i := 0 to Width - 1 do
-        begin
-          c := Src[j * Width + i];
-          if c <> 0 then
-          begin
-            WX := (XPos + i) mod VIR_SCREEN_WIDTH;
-            if WX < 0 then Inc(WX, VIR_SCREEN_WIDTH);
-            Offs := LongInt(YPos + j) * VIR_SCREEN_WIDTH + WX;
-            FrameBuffer[Page, Offs] := c;
-          end;
-        end;
-      end;
+        mov     ax, VGA_SEGMENT
+        mov     es, ax
+
+        mov     ax, YPos
+        cmp     ax, VIR_SCREEN_HEIGHT
+        jb      @NotNeg
+        jg      @End
+        mov     bx, ax
+        add     bx, Height
+        jnc     @End
+  @NotNeg:
+        mov     bx, BYTES_PER_LINE
+        mul     bx
+        mov     di, XPos
+        mov     bx, di
+        shr     di, 1
+        shr     di, 1
+        add     di, ax                  { DI = (YPos * 80) + XPos / 4 }
+        add     di, PageOffset
+
+        lds     si, BitMap              { Point to bitmap }
+
+        and     bl, 3
+        mov     cl, bl
+        mov     ah, 1
+        shl     ah, cl
+        sub     bl, 4
+        mov     cx, 4                   { 4 planes }
+
+  @Plane:
+        push    bx
+        push    cx                      { Planes to go }
+        push    ax                      { Mask in AH }
+
+        mov     al, MAP_MASK
+        mov     dx, SC_INDEX
+        out     dx, ax
+
+        cld
+        push    di
+        mov     bx, Width
+        shr     bx, 1
+        shr     bx, 1
+        mov     ax, BYTES_PER_LINE
+        sub     ax, bx                  { Space before next line }
+        mov     dx, Height
+  @Line:
+        mov     cx, bx
+        shr     cx, 1
+
+        push    ax
+        pushf
+
+  @Pixel:
+        lodsw
+        or      al, al
+        jz      @Skip1
+        seges
+        mov     [di], al
+  @Skip1:
+        inc     di
+        or      ah, ah
+        jz      @Skip2
+        seges
+        mov     [di], ah
+  @Skip2:
+        inc     di
+        loop    @Pixel
+
+        popf
+        rcl     cx, 1
+        jcxz    @Skip3
+
+        lodsb
+        or      al, al
+        jz      @Odd
+        stosb
+        jmp     @Skip3
+  @Odd: inc     di
+  @Skip3:
+        pop     ax
+        add     di, ax
+        dec     dx
+        jnz     @Line
+
+        pop     di
+
+        pop     ax
+        mov     al, ah
+        mov     cl, 4
+        shl     al, cl
+        or      ah, al                  { Mask for next byte }
+        rol     ah, 1                   { Bit mask for next plane }
+        pop     cx                      { Planes }
+        pop     bx
+        inc     bl                      { Still in the same byte? }
+        adc     di, 0
+        loop    @Plane
+
+    @End:
+        pop     ds
     end;
   end;
 
   procedure RecolorImage (XPos, YPos, Width, Height: Integer; var BitMap; Diff: Byte);
-    { Draw an image with color offset - zero bytes (transparent) are skipped }
-  var
-    Src: PByte;
-    i, j: Integer;
-    c: Byte;
-    WX: Integer;
-    Offs: LongInt;
   begin
-    if Height <= 0 then Exit;
-    if Width <= 0 then Exit;
-    if YPos >= FB_HEIGHT then Exit;
-    if (YPos < 0) and (YPos + Height <= 0) then Exit;
+    asm
+        push    ds
 
-    Src := @BitMap;
-    for j := 0 to Height - 1 do
-    begin
-      if (YPos + j >= 0) and (YPos + j < FB_HEIGHT) then
-      begin
-        for i := 0 to Width - 1 do
-        begin
-          c := Src[j * Width + i];
-          if c <> 0 then
-          begin
-            WX := (XPos + i) mod VIR_SCREEN_WIDTH;
-            if WX < 0 then Inc(WX, VIR_SCREEN_WIDTH);
-            Offs := LongInt(YPos + j) * VIR_SCREEN_WIDTH + WX;
-            FrameBuffer[Page, Offs] := c + Diff;
-          end;
-        end;
-      end;
+        mov     ax, VGA_SEGMENT
+        mov     es, ax
+
+        mov     ax, YPos
+        cmp     ax, VIR_SCREEN_HEIGHT
+        jb      @NotNeg
+        jg      @End
+        mov     bx, ax
+        add     bx, Height
+        jnc     @End
+  @NotNeg:
+        mov     bx, BYTES_PER_LINE
+        mul     bx
+        mov     di, XPos
+        mov     bx, di
+        shr     di, 1
+        shr     di, 1
+        add     di, ax                  { DI = (YPos * 80) + XPos / 4 }
+        add     di, PageOffset
+
+        lds     si, BitMap              { Point to bitmap }
+
+        and     bl, 3
+        mov     cl, bl
+        mov     ah, 1
+        shl     ah, cl
+        sub     bl, 4
+        mov     cx, 4                   { 4 planes }
+
+  @Plane:
+        push    bx
+        push    cx                      { Planes to go }
+        push    ax                      { Mask in AH }
+
+        mov     al, MAP_MASK
+        mov     dx, SC_INDEX
+        out     dx, ax
+
+        cld
+        push    di
+        mov     bx, Width
+        shr     bx, 1
+        shr     bx, 1
+        mov     ax, BYTES_PER_LINE
+        sub     ax, bx                  { Space before next line }
+        mov     dx, Height
+  @Line:
+        mov     cx, bx
+        shr     cx, 1
+
+        push    ax
+        pushf
+
+  @Pixel:
+        lodsw
+        or      al, al
+        jz      @Skip1
+        add     al, Diff
+        seges
+        mov     [di], al
+  @Skip1:
+        inc     di
+        or      ah, ah
+        jz      @Skip2
+        add     ah, Diff
+        seges
+        mov     [di], ah
+  @Skip2:
+        inc     di
+        loop    @Pixel
+
+        popf
+        rcl     cx, 1
+        jcxz    @Skip3
+
+        lodsb
+        or      al, al
+        jz      @Odd
+        add     al, Diff
+        stosb
+        jmp     @Skip3
+  @Odd: inc     di
+  @Skip3:
+        pop     ax
+        add     di, ax
+        dec     dx
+        jnz     @Line
+
+        pop     di
+
+        pop     ax
+        mov     al, ah
+        mov     cl, 4
+        shl     al, cl
+        or      ah, al                  { Mask for next byte }
+        rol     ah, 1                   { Bit mask for next plane }
+        pop     cx                      { Planes }
+        pop     bx
+        inc     bl                      { Still in the same byte? }
+        adc     di, 0
+        loop    @Plane
+
+    @End:
+        pop     ds
     end;
   end;
 
   procedure DrawPart (XPos, YPos, Width, Height, Y1, Y2: Integer; var BitMap);
-    { Draw an image clipped to rows Y1..Y2 }
-  var
-    Src: PByte;
-    i, j: Integer;
-    c: Byte;
-    WX: Integer;
-    Offs: LongInt;
   begin
-    if Height <= 0 then Exit;
-    if Width <= 0 then Exit;
-    if YPos >= FB_HEIGHT then Exit;
-    if (YPos < 0) and (YPos + Height <= 0) then Exit;
+    asm
+        push    ds
+        cmp     Height, 0
+        jle     @End
 
-    Src := @BitMap;
-    for j := 0 to Height - 1 do
-    begin
-      if (j < Y1) or (j > Y2) then Continue;
-      if (YPos + j >= 0) and (YPos + j < FB_HEIGHT) then
-      begin
-        for i := 0 to Width - 1 do
-        begin
-          c := Src[j * Width + i];
-          if c <> 0 then
-          begin
-            WX := (XPos + i) mod VIR_SCREEN_WIDTH;
-            if WX < 0 then Inc(WX, VIR_SCREEN_WIDTH);
-            Offs := LongInt(YPos + j) * VIR_SCREEN_WIDTH + WX;
-            FrameBuffer[Page, Offs] := c;
-          end;
-        end;
-      end;
+        mov     ax, VGA_SEGMENT
+        mov     es, ax
+
+        mov     ax, YPos
+        cmp     ax, VIR_SCREEN_HEIGHT
+        jb      @NotNeg
+        jg      @End
+        mov     bx, ax
+        add     bx, Height
+        jnc     @End
+  @NotNeg:
+        mov     bx, BYTES_PER_LINE
+        mul     bx
+        mov     di, XPos
+        mov     bx, di
+        shr     di, 1
+        shr     di, 1
+        add     di, ax                  { DI = (YPos * 80) + XPos / 4 }
+        add     di, PageOffset
+
+        lds     si, BitMap              { Point to bitmap }
+
+        and     bl, 3
+        mov     cl, bl
+        mov     ah, 1
+        shl     ah, cl
+        sub     bl, 4
+        mov     cx, 4                   { 4 planes }
+
+  @Plane:
+        push    bx
+        push    cx                      { Planes to go }
+        push    ax                      { Mask in AH }
+
+        mov     al, MAP_MASK
+        mov     dx, SC_INDEX
+        out     dx, ax
+
+        cld
+        push    di
+        mov     bx, Width
+        shr     bx, 1
+        shr     bx, 1
+        mov     ax, BYTES_PER_LINE
+        sub     ax, bx                  { Space before next line }
+
+        xor     dx, dx
+  @Line:
+        cmp     dx, Y1
+        jl      @EndLine
+        cmp     dx, Y2
+        jg      @EndLine
+
+        mov     cx, bx
+        shr     cx, 1
+
+        push    ax
+        pushf
+
+  @Pixel:
+        lodsw
+        or      al, al
+        jz      @Skip1
+        seges
+        mov     [di], al
+  @Skip1:
+        inc     di
+        or      ah, ah
+        jz      @Skip2
+        seges
+        mov     [di], ah
+  @Skip2:
+        inc     di
+        loop    @Pixel
+
+        popf
+        rcl     cx, 1
+        jcxz    @Skip3
+
+        lodsb
+        or      al, al
+        jz      @Odd
+        stosb
+        jmp     @Skip3
+  @Odd: inc     di
+  @Skip3:
+        pop     ax
+        add     di, ax
+        jmp     @1
+
+  @EndLine:
+        add     si, bx
+        add     di, BYTES_PER_LINE
+
+  @1:   inc     dx
+        cmp     dx, Height
+        jb      @Line
+
+        pop     di
+
+        pop     ax
+        mov     al, ah
+        mov     cl, 4
+        shl     al, cl
+        or      ah, al                  { Mask for next byte }
+        rol     ah, 1                   { Bit mask for next plane }
+        pop     cx                      { Planes }
+        pop     bx
+        inc     bl                      { Still in the same byte? }
+        adc     di, 0
+        loop    @Plane
+
+  @End:
+        pop     ds
     end;
   end;
 
   procedure UpSideDown (XPos, YPos, Width, Height: Integer; var BitMap);
-    { Draw an image upside-down - zero bytes (transparent) are skipped }
-  var
-    Src: PByte;
-    i, j: Integer;
-    c: Byte;
-    DestY: Integer;
-    WX: Integer;
-    Offs: LongInt;
+    { Draw an image on the screen up-side-down (NULL-bytes are ignored) }
   begin
-    if Height <= 0 then Exit;
-    if Width <= 0 then Exit;
-    if YPos >= FB_HEIGHT then Exit;
-    if (YPos < 0) and (YPos + Height <= 0) then Exit;
+    asm
+        push    ds
 
-    Src := @BitMap;
-    for j := 0 to Height - 1 do
-    begin
-      DestY := YPos + Height - 1 - j;
-      if (DestY >= 0) and (DestY < FB_HEIGHT) then
-      begin
-        for i := 0 to Width - 1 do
-        begin
-          c := Src[j * Width + i];
-          if c <> 0 then
-          begin
-            WX := (XPos + i) mod VIR_SCREEN_WIDTH;
-            if WX < 0 then Inc(WX, VIR_SCREEN_WIDTH);
-            Offs := LongInt(DestY) * VIR_SCREEN_WIDTH + WX;
-            FrameBuffer[Page, Offs] := c;
-          end;
-        end;
-      end;
+        mov     ax, VGA_SEGMENT
+        mov     es, ax
+
+        mov     ax, YPos
+        cmp     ax, VIR_SCREEN_HEIGHT
+        jb      @NotNeg
+        jg      @End
+        mov     bx, ax
+        add     bx, Height
+        jnc     @End
+  @NotNeg:
+        add     ax, Height
+        dec     ax
+        mov     bx, BYTES_PER_LINE
+        mul     bx
+        mov     di, XPos
+        mov     bx, di
+        shr     di, 1
+        shr     di, 1
+        add     di, ax                  { DI = (YPos * 80) + XPos / 4 }
+        add     di, PageOffset
+
+        lds     si, BitMap              { Point to bitmap }
+
+        and     bl, 3
+        mov     cl, bl
+        mov     ah, 1
+        shl     ah, cl
+        sub     bl, 4
+        mov     cx, 4                   { 4 planes }
+
+  @Plane:
+        push    bx
+        push    cx                      { Planes to go }
+        push    ax                      { Mask in AH }
+
+        mov     al, MAP_MASK
+        mov     dx, SC_INDEX
+        out     dx, ax
+
+        cld
+        push    di
+        mov     bx, Width
+        shr     bx, 1
+        shr     bx, 1
+        mov     ax, BYTES_PER_LINE
+        add     ax, bx                  { Space before next line }
+        mov     dx, Height
+  @Line:
+        mov     cx, bx
+        shr     cx, 1
+
+        push    ax
+        pushf
+
+  @Pixel:
+        lodsw
+        or      al, al
+        jz      @Skip1
+        seges
+        mov     [di], al
+  @Skip1:
+        inc     di
+        or      ah, ah
+        jz      @Skip2
+        seges
+        mov     [di], ah
+  @Skip2:
+        inc     di
+        loop    @Pixel
+
+        popf
+        rcl     cx, 1
+        jcxz    @Skip3
+
+        lodsb
+        or      al, al
+        jz      @Odd
+        stosb
+        jmp     @Skip3
+  @Odd: inc     di
+  @Skip3:
+        pop     ax
+        sub     di, ax
+        dec     dx
+        jnz     @Line
+
+        pop     di
+
+        pop     ax
+        mov     al, ah
+        mov     cl, 4
+        shl     al, cl
+        or      ah, al                  { Mask for next byte }
+        rol     ah, 1                   { Bit mask for next plane }
+        pop     cx                      { Planes }
+        pop     bx
+        inc     bl                      { Still in the same byte? }
+        adc     di, 0
+        loop    @Plane
+  @End:
+        pop     ds
     end;
   end;
 
   procedure PutImage (XPos, YPos, Width, Height: Integer; var BitMap);
-    { Draw an image - ALL bytes are drawn (opaque) }
-  var
-    Src: PByte;
-    i, j: Integer;
-    WX: Integer;
-    Offs: LongInt;
+    { Draw an image on the screen (NULL-bytes are NOT ignored) }
   begin
-    if Height <= 0 then Exit;
-    if Width <= 0 then Exit;
+    asm
+        push    ds
+        push    es
+        mov     ax, VGA_SEGMENT
+        mov     es, ax
 
-    Src := @BitMap;
-    for j := 0 to Height - 1 do
-    begin
-      if (YPos + j >= 0) and (YPos + j < FB_HEIGHT) then
-      begin
-        for i := 0 to Width - 1 do
-        begin
-          WX := (XPos + i) mod VIR_SCREEN_WIDTH;
-          if WX < 0 then Inc(WX, VIR_SCREEN_WIDTH);
-          Offs := LongInt(YPos + j) * VIR_SCREEN_WIDTH + WX;
-          FrameBuffer[Page, Offs] := Src[j * Width + i];
-        end;
-      end;
+        mov     ax, YPos
+        mov     bx, BYTES_PER_LINE
+        mul     bx
+        mov     di, XPos
+        mov     bx, di
+        shr     di, 1
+        shr     di, 1
+        add     di, ax                  { DI = (YPos * 80) + XPos / 4 }
+        add     di, PageOffset
+
+        lds     si, BitMap              { Point to bitmap }
+
+        and     bl, 3
+        mov     cl, bl
+        mov     ah, 1
+        shl     ah, cl
+        sub     bl, 4
+        mov     cx, 4                   { 4 planes }
+
+  @Plane:
+        push    bx
+        push    cx                      { Planes to go }
+        push    ax                      { Mask in AH }
+
+        mov     al, MAP_MASK
+        mov     dx, SC_INDEX
+        out     dx, ax
+
+        cld
+        push    di
+        mov     bx, Width
+        shr     bx, 1
+        shr     bx, 1
+        mov     ax, BYTES_PER_LINE
+        sub     ax, bx                  { Space before next line }
+        mov     dx, Height
+  @Line:
+        mov     cx, bx
+        shr     cx, 1
+        rep     movsw
+        rcl     cx, 1
+        rep     movsb
+        add     di, ax
+        dec     dx
+        jnz     @Line
+
+        pop     di
+
+        pop     ax
+        mov     al, ah
+        mov     cl, 4
+        shl     al, cl
+        or      ah, al                  { Mask for next byte }
+        rol     ah, 1                   { Bit mask for next plane }
+        pop     cx                      { Planes }
+        pop     bx
+        inc     bl                      { Still in the same byte? }
+        adc     di, 0
+        loop    @Plane
+
+
+        pop     es
+        pop     ds
     end;
   end;
 
-  procedure GetImage (XPos, YPos, Width, Height: Integer; var BitMap);
-    { Read an image from the framebuffer }
-  var
-    Dst: PByte;
-    i, j: Integer;
-    WX: Integer;
-    Offs: LongInt;
-  begin
-    if Height <= 0 then Exit;
-    if Width <= 0 then Exit;
 
-    Dst := @BitMap;
-    for j := 0 to Height - 1 do
-    begin
-      if (YPos + j >= 0) and (YPos + j < FB_HEIGHT) then
-      begin
-        for i := 0 to Width - 1 do
-        begin
-          WX := (XPos + i) mod VIR_SCREEN_WIDTH;
-          if WX < 0 then Inc(WX, VIR_SCREEN_WIDTH);
-          Offs := LongInt(YPos + j) * VIR_SCREEN_WIDTH + WX;
-          Dst[j * Width + i] := FrameBuffer[Page, Offs];
-        end;
-      end
-      else
-        FillChar(Dst[j * Width], Width, 0);
+  procedure GetImage (XPos, YPos, Width, Height: Integer; var BitMap);
+  begin
+    asm
+        push    ds
+        push    es
+
+        mov     cx, PageOffset
+
+        mov     ax, VGA_SEGMENT
+        mov     ds, ax
+
+        mov     ax, YPos
+        mov     bx, BYTES_PER_LINE
+        mul     bx
+        mov     si, XPos
+        mov     bx, si
+        shr     si, 1
+        shr     si, 1
+        add     si, ax                  { SI = (YPos * 80) + XPos / 4 }
+        add     si, cx
+
+        les     di, BitMap              { Point to bitmap }
+
+        and     bl, 3
+        sub     bl, 4
+        mov     cx, 4                   { 4 planes }
+
+  @Plane:
+        push    bx
+        push    cx                      { Planes to go }
+
+        mov     ah, bl
+        and     ah, 3
+        mov     al, READ_MAP
+        mov     dx, GC_INDEX
+        out     dx, ax
+
+        cld
+        push    si
+        mov     bx, Width
+        shr     bx, 1
+        shr     bx, 1
+        mov     ax, BYTES_PER_LINE
+        sub     ax, bx                  { Space before next line }
+        mov     dx, Height
+  @Line:
+        mov     cx, bx
+        shr     cx, 1
+        rep     movsw
+        rcl     cx, 1
+        rep     movsb
+        add     si, ax
+        dec     dx
+        jnz     @Line
+
+        pop     si
+
+        pop     cx                      { Planes }
+        pop     bx
+        inc     bl                      { Still in the same byte? }
+        adc     si, 0
+        loop    @Plane
+
+
+        pop     es
+        pop     ds
     end;
   end;
 
   procedure Fill (X, Y, W, H: Integer; Attr: Integer);
-    { Fill an area with a color - with X wrapping }
-  var
-    i, j: Integer;
-    WX: Integer;
-    Offs: LongInt;
-    FillByte: Byte;
+    { Fills an area on the screen with Attr }
   begin
-    if (W <= 0) or (H <= 0) then Exit;
-    FillByte := Byte(Attr);
+    asm
+        mov     ax, VGA_SEGMENT
+        mov     es, ax
 
-    for j := 0 to H - 1 do
-    begin
-      if (Y + j >= 0) and (Y + j < FB_HEIGHT) then
-      begin
-        for i := 0 to W - 1 do
-        begin
-          WX := (X + i) mod VIR_SCREEN_WIDTH;
-          if WX < 0 then Inc(WX, VIR_SCREEN_WIDTH);
-          Offs := LongInt(Y + j) * VIR_SCREEN_WIDTH + WX;
-          FrameBuffer[Page, Offs] := FillByte;
-        end;
-      end;
+        cld
+        mov     dx, Y
+        mov     ax, BYTES_PER_LINE
+        mul     dx
+        mov     di, X
+        push    di
+        shr     di, 1
+        shr     di, 1
+        add     di, ax                  { DI = Y * (width / 4) + X / 4 }
+        add     di, PageOffset
+        pop     cx
+        and     cx, 3                   { CX = X mod 4 }
+
+        mov     ah, 0Fh
+        shl     ah, cl
+        and     ah, 0Fh
+
+        mov     si, H
+        or      si, si
+        jz      @End                    { Height 0 }
+        mov     bh, byte ptr Attr
+        mov     dx, W
+        or      dx, dx
+        jz      @End                    { Width 0 }
+        add     cx, dx
+        mov     dx, SC_INDEX
+        mov     al, MAP_MASK
+        sub     cx, 4
+        jc      @2
+        test    cl, 3h
+        jnz     @0
+        sub     cx, 4
+  @0:   jc      @2
+        out     dx, ax
+
+        mov     al, bh                  { Attr }
+        push    si                      { Height }
+        push    di
+  @4:   stosb                           { Left vertical line }
+        add     di, BYTES_PER_LINE - 1
+        dec     si
+        jnz     @4
+        pop     di
+        inc     di
+        pop     si
+
+        push    ax
+        mov     ax, 0F00h + MAP_MASK
+        out     dx, ax
+        pop     ax
+
+        mov     ah, al                  { Attr }
+        push    cx                      { Width }
+        shr     cx, 1
+        shr     cx, 1
+
+        push    si                      { Height }
+        push    di
+  @5:   push    di
+        push    cx
+        shr     cx, 1
+        rep     stosw                   { Fill middle part }
+        rcl     cx, 1
+        rep     stosb
+        pop     cx
+        pop     di
+        add     di, BYTES_PER_LINE
+        dec     si
+        jnz     @5
+        pop     di
+        add     di, cx                  { Point to last strip }
+        pop     si                      { Height }
+
+        pop     cx                      { Width }
+        mov     bh, al                  { Attr }
+        mov     bl, 0Fh                 { Mask }
+        jmp     @3
+
+  @2:   mov     bl, ah                  { Begin and end in one single byte }
+
+  @3:   and     cl, 3
+        mov     ah, 0
+  @1:   shl     ah, 1
+        add     ah, 1
+        dec     cl
+        jnz     @1
+
+        and     ah, bl                  { Use both masks }
+        mov     al, MAP_MASK
+        out     dx, ax
+        mov     al, bh                  { Attr }
+  @6:   stosb                           { Draw right vertical line }
+        add     di, BYTES_PER_LINE - 1
+        dec     si
+        jnz     @6
+  @End:
     end;
   end;
-
-
-  { ===== Palette Operations ===== }
 
   procedure SetPalette (Color, Red, Green, Blue: Byte);
   begin
-    PaletteR[Color] := Red;
-    PaletteG[Color] := Green;
-    PaletteB[Color] := Blue;
-  end;
-
-  procedure ReadPalette (var NewPalette);
-    { Apply a palette to the display (confusing name from original -
-      it actually WRITES the palette to the VGA DAC) }
-  var
-    P: PByte;
-    i: Integer;
-  begin
-    P := @NewPalette;
-    for i := 0 to 255 do
-    begin
-      PaletteR[i] := P[i * 3 + 0];
-      PaletteG[i] := P[i * 3 + 1];
-      PaletteB[i] := P[i * 3 + 2];
+    asm
+          mov     dx, 03C8h       { DAC Write Address Register }
+          mov     al, Color
+          out     dx, al
+          inc     dx
+          mov     al, Red
+          out     dx, al
+          mov     al, Green
+          out     dx, al
+          mov     al, Blue
+          out     dx, al
     end;
   end;
 
-  procedure ClearPalette;
+  procedure ReadPalette (var NewPalette);
+    { Read whole palette }
   begin
-    FillChar(PaletteR, SizeOf(PaletteR), 0);
-    FillChar(PaletteG, SizeOf(PaletteG), 0);
-    FillChar(PaletteB, SizeOf(PaletteB), 0);
+    asm
+        push    ds
+        lds     si, NewPalette
+        mov     dx, 3C8h        { VGA pel address }
+        mov     al, 0
+        cli
+        cld
+        out     dx, al
+        inc     dx
+        mov     cx, 3 * 100h
+  @1:   lodsb
+        out     dx, al
+        dec     cx
+        jnz     @1
+        sti
+        pop     ds
+
+{          push    es
+          push    bp
+          mov     ax, 1012h
+          xor     bx, bx
+          mov     cx, 256
+          les     dx, NewPalette
+          int     10h
+          pop     bp
+          pop     es   }
+    end;
   end;
 
+  procedure ClearPalette; assembler;
+  asm
+        cli
+        mov     dx, 3C8h        { VGA pel address }
+        mov     al, 0
+        out     dx, al
+        inc     dx
+        mov     cx, 3 * 100h
+  @1:   out     dx, al
+        dec     cx
+        jnz     @1
+        sti
+  end;
 
-  { ===== Page Management ===== }
 
   function CurrentPage: Integer;
   begin
@@ -733,225 +1252,284 @@ implementation
     GetPageOffset := PageOffset;
   end;
 
-
-  { ===== Background Save/Restore Stack ===== }
-
   procedure ResetStack;
-  var
-    pg: Integer;
   begin
-    { Only reset the stack counters - do NOT free or invalidate saved data.
-      In the original VGA, ResetStack just reset the stack pointer so new
-      PushBackGr calls reuse memory. PopBackGr can still access old entries
-      via their handles (addresses). We must preserve old entries so PopBackGr
-      can restore backgrounds from previous frames. }
-    for pg := 0 to MAX_PAGE do
-      StackTops[pg] := 0;
+    Stack[0] := PAGE_0 + PAGE_SIZE + SAFE;
+    Stack[1] := PAGE_1 + PAGE_SIZE + SAFE;
   end;
 
   function PushBackGr (X, Y, W, H: Integer): Word;
-    { Save background - returns handle encoding page+index (0 = failed).
-      Handle format: (Page * MAX_BACKGR_STACK + Idx + 1) so PopBackGr
-      can recover the correct page even if called when a different page
-      is current (e.g. menu code uses a cached Page variable). }
-  var
-    Idx: Integer;
-    DataSize: Word;
-    i, j: Integer;
-    WX: Integer;
-    Offs: LongInt;
-    DstOffs: Integer;
+    { Save background (X mod 4 = 0, W mod 4 = 0) }
+    var
+      StackPointer: Word;
   begin
     PushBackGr := 0;
-
     if not ((Y + H >= 0) and (Y < 200)) then
       Exit;
+    StackPointer := Stack [Page];
+    asm
+        mov     bx, PageOffset
+        mov     di, StackPointer
+        push    ds
+        push    es
 
-    Idx := StackTops[Page];
-    if Idx >= MAX_BACKGR_STACK then
-      Exit;
+        mov     ax, VGA_SEGMENT
+        mov     ds, ax
+        mov     es, ax
 
-    DataSize := W * H;
-    if DataSize = 0 then Exit;
+        cld
+        mov     dx, SC_INDEX
+        mov     ax, 0100h + MAP_MASK
+        out     dx, ax
+        mov     ax, X
+        mov     [di], ax
+        mov     ax, 0200h + MAP_MASK
+        out     dx, ax
+        mov     ax, Y
+        mov     [di], ax
+        mov     ax, 0400h + MAP_MASK
+        out     dx, ax
+        mov     ax, W
+        mov     [di], ax
+        mov     ax, 0800h + MAP_MASK
+        out     dx, ax
+        mov     ax, H
+        stosw
+        mov     al, 'M'
+        stosb
 
-    { NOTE: Do NOT use "with BackGrStacks[Page, Idx] do" here!
-      The record has fields named X, Y, W, H which would shadow the
-      function parameters of the same name, causing silent data corruption. }
+        mov     dx, GC_INDEX
+        mov     al, GRAPHICS_MODE
+        out     dx, al
+        inc     dx
+        in      al, dx
+        push    ax
+        mov     al, 41h
+        out     dx, al
 
-    { Free old data if this slot was previously used }
-    if BackGrStacks[Page, Idx].Valid and (BackGrStacks[Page, Idx].Data <> nil) then
-      FreeMem(BackGrStacks[Page, Idx].Data, BackGrStacks[Page, Idx].DataSize);
-    GetMem(BackGrStacks[Page, Idx].Data, DataSize);
-    if BackGrStacks[Page, Idx].Data = nil then
-    begin
-      BackGrStacks[Page, Idx].Valid := False;
-      Exit;
+        mov     dx, SC_INDEX
+        mov     ax, 0F00h + MAP_MASK
+        out     dx, ax
+
+        mov     ax, READ_MAP
+        mov     dx, GC_INDEX
+        out     dx, ax
+
+        mov     dx, Y
+        mov     ax, BYTES_PER_LINE
+        mul     dx
+        mov     si, X
+        shr     si, 1
+        shr     si, 1
+        add     si, ax
+        add     si, bx
+
+        mov     cx, W
+        shr     cx, 1
+        shr     cx, 1
+
+        mov     bx, H
+
+  @1:   push    cx
+        rep
+        movsb                   { copy 4 pixels }
+        pop     cx
+        add     si, BYTES_PER_LINE
+        sub     si, cx
+        dec     bx
+        jnz     @1
+
+        mov     dx, GC_INDEX
+        pop     ax
+        mov     ah, al
+        mov     al, GRAPHICS_MODE
+        out     dx, ax
+
+        pop     es
+        pop     ds
     end;
-
-    { Store metadata FIRST so the copy loop uses correct values }
-    BackGrStacks[Page, Idx].X := X;
-    BackGrStacks[Page, Idx].Y := Y;
-    BackGrStacks[Page, Idx].W := W;
-    BackGrStacks[Page, Idx].H := H;
-    BackGrStacks[Page, Idx].DataSize := DataSize;
-    BackGrStacks[Page, Idx].Valid := True;
-
-    { Copy rectangle from framebuffer with X wrapping }
-    DstOffs := 0;
-    for j := 0 to H - 1 do
-    begin
-      if (Y + j >= 0) and (Y + j < FB_HEIGHT) then
-      begin
-        for i := 0 to W - 1 do
-        begin
-          WX := (X + i) mod VIR_SCREEN_WIDTH;
-          if WX < 0 then Inc(WX, VIR_SCREEN_WIDTH);
-          Offs := LongInt(Y + j) * VIR_SCREEN_WIDTH + WX;
-          BackGrStacks[Page, Idx].Data^[DstOffs + i] := FrameBuffer[Page, Offs];
-        end;
-      end
-      else
-        FillChar(BackGrStacks[Page, Idx].Data^[DstOffs], W, #0);
-      Inc(DstOffs, W);
-    end;
-
-    Inc(StackTops[Page]);
-    { Encode page into handle so PopBackGr can find the right stack }
-    PushBackGr := Word(Page * MAX_BACKGR_STACK + Idx + 1);
+    PushBackGr := Stack [Page];
+    Inc (Stack [Page], W * H + 8);
   end;
 
   procedure PopBackGr (Address: Word);
-    { Restore background from handle. Handle encodes source page+index
-      so we find the right data. But restore always goes to the CURRENT
-      page (Page variable), matching original VGA behavior where PopBackGr
-      writes via PageOffset to the current display page. }
-  var
-    Pg: Integer;
-    Idx: Integer;
-    i, j: Integer;
-    WX: Integer;
-    Offs: LongInt;
-    SrcOffs: Integer;
+    var
+      X, Y, W, H: Integer;
   begin
     if Address = 0 then
       Exit;
+    asm
+        mov     bx, PageOffset
+        mov     si, Address
 
-    { Decode source page and index from handle }
-    Dec(Address);
-    Pg := Integer(Address) div MAX_BACKGR_STACK;
-    Idx := Integer(Address) mod MAX_BACKGR_STACK;
+        push    ds
+        push    es
 
-    if (Pg < 0) or (Pg > MAX_PAGE) then Exit;
-    if (Idx < 0) or (Idx >= MAX_BACKGR_STACK) then Exit;
+        mov     ax, VGA_SEGMENT
+        mov     ds, ax
+        mov     es, ax
 
-    with BackGrStacks[Pg, Idx] do
-    begin
-      if not Valid then Exit;
-      if Data = nil then Exit;
+        cld
+        mov     dx, GC_INDEX
+        mov     ax, 0000h + READ_MAP
+        out     dx, ax
+        mov     ax, [si]
+        mov     X, ax
+        mov     ax, 0100h + READ_MAP
+        out     dx, ax
+        mov     ax, [si]
+        mov     Y, ax
+        mov     ax, 0200h + READ_MAP
+        out     dx, ax
+        mov     ax, [si]
+        mov     W, ax
+        mov     ax, 0300h + READ_MAP
+        out     dx, ax
+        lodsw
+        mov     H, ax
+        lodsb
+        cmp     al, 'M'
+        jz      @@1
+{$IFDEF DEBUG}
+        int     3
+{$ENDIF}
+        jmp     @End
+    @@1:
+        mov     dx, GC_INDEX
+        mov     al, GRAPHICS_MODE
+        out     dx, al
+        inc     dx
+        in      al, dx
+        push    ax
+        mov     al, 41h
+        out     dx, al
 
-      { Restore rectangle to the CURRENT page (not the source page).
-        In the original VGA, PopBackGr reads saved data from the stack
-        area (which is per-page) but writes to PageOffset (current page).
-        The menu uses a cached Page variable for BG array indexing, but
-        the actual restore must go to whichever page is current now. }
-      SrcOffs := 0;
-      for j := 0 to H - 1 do
-      begin
-        if (Y + j >= 0) and (Y + j < FB_HEIGHT) then
-        begin
-          for i := 0 to W - 1 do
-          begin
-            WX := (X + i) mod VIR_SCREEN_WIDTH;
-            if WX < 0 then Inc(WX, VIR_SCREEN_WIDTH);
-            Offs := LongInt(Y + j) * VIR_SCREEN_WIDTH + WX;
-            FrameBuffer[Page, Offs] := Data^[SrcOffs + i];
-          end;
-        end;
-        Inc(SrcOffs, W);
-      end;
+        mov     dx, SC_INDEX
+        mov     ax, 0F00h + MAP_MASK
+        out     dx, ax
+
+        mov     ax, READ_MAP
+        mov     dx, GC_INDEX
+        out     dx, ax
+
+        mov     dx, Y
+        mov     ax, BYTES_PER_LINE
+        mul     dx
+        mov     di, X
+        shr     di, 1
+        shr     di, 1
+        add     di, ax
+        add     di, bx
+
+        mov     cx, W
+        shr     cx, 1
+        shr     cx, 1
+
+        mov     bx, H
+
+  @1:   push    cx
+        rep
+        movsb                   { copy 4 pixels }
+        pop     cx
+        add     di, BYTES_PER_LINE
+        sub     di, cx
+        dec     bx
+        jnz     @1
+
+        mov     dx, GC_INDEX
+        pop     ax
+        mov     ah, al
+        mov     al, GRAPHICS_MODE
+        out     dx, ax
+
+  @end: pop     es
+        pop     ds
     end;
   end;
-
-
-  { ===== Bitmap Drawing (for text) ===== }
 
   procedure DrawBitmap (X, Y: Integer; var BitMap; Attr: Byte);
-    { Draw a 1-bit bitmap. Bitmap starts with width byte, height byte,
-      then packed bit data (LSB first, matching original x86 SHR/JNC). }
+    { Bitmap starts with size W, H (Byte) }
   var
-    Src: PByte;
-    BmW, BmH: Integer;
-    i, j: Integer;
-    CurByte: Byte;
-    BitsLeft: Integer;
-    SrcIdx: Integer;
+    W, H, PageOffset: Integer;
   begin
-    Src := @BitMap;
-    BmW := Src[0];
-    BmH := Src[1];
-    SrcIdx := 2;
-    BitsLeft := 0;
-    CurByte := 0;
+    PageOffset := GetPageOffset;
+    asm
+        push    es
+        push    ds
 
-    for j := 0 to BmH - 1 do
-    begin
-      for i := 0 to BmW - 1 do
-      begin
-        if BitsLeft = 0 then
-        begin
-          CurByte := Src[SrcIdx];
-          Inc(SrcIdx);
-          BitsLeft := 8;
-        end;
-        Dec(BitsLeft);
-        if (CurByte and 1) <> 0 then
-          PutPixel(X + i, Y + j, Attr);
-        CurByte := CurByte shr 1;
-      end;
+        lds     si, BitMap
+        mov     ah, 0
+        cld
+        lodsb
+        mov     W, ax
+        lodsb
+        mov     H, ax
+        mov     ax, VGA_SEGMENT
+        mov     es, ax
+
+        mov     bl, 0
+        mov     cx, H
+        mov     dx, Y
+    @1: push    cx
+        mov     cx, X
+        mov     di, W
+    @2: push    cx
+        push    dx
+        or      bl, bl
+        jnz     @3
+        lodsb
+        mov     bh, al
+        mov     bl, 8
+    @3: dec     bl
+        shr     bh, 1
+        jnc     @4
+
+        push    si
+        push    di
+        push    bx
+        mov     al, Attr
+
+    @PutPixel:
+      { CX = X, DX = Y, AL = Attr }
+        push    ax
+        mov     ax, BYTES_PER_LINE
+        mul     dx
+        push    cx
+        shr     cx, 1
+        shr     cx, 1
+        add     ax, cx
+        mov     di, ax
+        add     di, PageOffset
+        pop     cx
+        and     cl, 3
+        mov     ah, 1
+        shl     ah, cl
+        mov     al, MAP_MASK
+        mov     dx, SC_INDEX
+        out     dx, ax
+        pop     ax
+        stosb
+
+        pop     bx
+        pop     di
+        pop     si
+
+    @4:
+        pop     dx
+        pop     cx
+        inc     cx
+        dec     di
+        jnz     @2
+
+        inc     dx
+        pop     cx
+        dec     cx
+        jnz     @1
+        pop     ds
+        pop     es
     end;
   end;
-
-
-  { ===== SDL Event Processing ===== }
-
-  procedure PollEvents;
-  var
-    Event: TSDL_Event;
-  begin
-    { Process SDL events - keyboard handling is done by the Keyboard unit }
-    { Here we just check for quit }
-    while SDL_PeepEvents(@Event, 1, SDL_GETEVENT, SDL_QUITEV, SDL_QUITEV) > 0 do
-    begin
-      QuitRequested := True;
-      Halt(0);
-    end;
-  end;
-
-  function IsQuitRequested: Boolean;
-  begin
-    IsQuitRequested := QuitRequested;
-  end;
-
-
-  { ===== Unit Initialization ===== }
-
-var
-  i: Integer;
 
 begin
-  QuitRequested := False;
-  Page := 0;
-  PageOffset := PAGE_0;
-  XView := 0;
-  YView := 0;
-  YOffset := 0;
-  SDLWindow := nil;
-  SDLRenderer := nil;
-  RenderTexture := nil;
-  FillChar(FrameBuffer, SizeOf(FrameBuffer), 0);
-  FillChar(PaletteR, SizeOf(PaletteR), 0);
-  FillChar(PaletteG, SizeOf(PaletteG), 0);
-  FillChar(PaletteB, SizeOf(PaletteB), 0);
-  FillChar(BackGrStacks, SizeOf(BackGrStacks), 0);
-  FillChar(StackTops, SizeOf(StackTops), 0);
+  OldScreenMode := GetMode;
 end.

@@ -18,7 +18,7 @@ interface
     Txt,
     Music,
     KeyBoard,
-    sdl2;
+    Crt;
 
   const
     Stat: Boolean = FALSE;
@@ -75,9 +75,9 @@ implementation
       if Scroll > 0 then
         for j := LastXView [Page] to XView do
         begin
-          { Original cleared enemy column markers at row 0 here via PutPixel.
-            In VGA Mode X, row 0 was above the visible area due to CRTC
-            start address offset. In SDL2 row 0 is visible, so skip it. }
+          i := j - W - W;
+          if i >= 0 then
+            PutPixel (i, 0, 0);
           i := W - j mod W - 1;
           Redraw (j div W + NH + 1, i);
         end;
@@ -98,7 +98,7 @@ implementation
       for i := 0 to Options.XSize - 1 - 1 do
         for j := 0 to NH - 1 do
           if (i <> MapX) or (j <> MapY) then
-            if (WorldMap^ [i, j] in [#$E0 .. #$EF])
+            if (WorldMap^ [i, j] in ['à' .. 'ï'])
               and (WorldMap^ [i + 1, j] = PipeCode [2]) then
               begin
                 MapX := i;
@@ -124,7 +124,6 @@ implementation
       CountingScore,
       ShowObjects: Boolean;
       OnlyDraw: Boolean;
-      ScoreTick: Byte;
 
 
     procedure WriteTotalScore;
@@ -142,20 +141,14 @@ implementation
 
     procedure ShowTotalBack;
     begin
-      TotalBackGrAddr[CurrentPage] := PushBackGr (XView + 160, 120, 120, 8);
-      WriteTotalScore;
-      { Play a tick sound while counting down the score.
-        Original called Beep(4*880), Beep(2*880), Beep(0) within one frame
-        but with SDL2 async audio only the last value would be heard (silence).
-        Alternate between high and low tones each tick for a pleasant effect. }
       if Passed and CountingScore then
-      begin
-        if Odd(ScoreTick) then
-          Beep (880)
-        else
-          Beep (2 * 880);
-        Inc(ScoreTick);
-      end;
+        Beep (4 * 880);
+      TotalBackGrAddr[CurrentPage] := PushBackGr (XView + 160, 120, 120, 8);
+      if Passed and CountingScore then
+        Beep (2 * 880);
+      WriteTotalScore;
+      if Passed and CountingScore then
+        Beep (0);
     end;
 
     procedure HideTotalBack;
@@ -251,7 +244,7 @@ implementation
               cdStar := 1;
               EndPause := TRUE;
             end;
-            if Cheat = kbF+kb1+kbF+kb2 then    { F1F2 - Champ }
+            if Cheat = kbF+kb1+kbF+kb2 then    { 9C32 - Champ }
             begin
               cdChamp := 1;
               EndPause := TRUE;
@@ -304,7 +297,7 @@ implementation
               Passed := TRUE;
               Waiting := TRUE;
               TextCounter := 200;
-              PipeCode [1] := #$E7;
+              PipeCode [1] := 'ç';
               InPipe := TRUE;
               EndPause := TRUE;
             end;
@@ -314,7 +307,7 @@ implementation
               RefreshPalette (Palette);
               EndPause := TRUE;
             end;
-            if (Cheat = kbE+kbG+kbA+kbM+kbO+kbD+kbE) then  { EGAMODE }
+            if (Cheat = kbE+kbG+kbA+kbM+kbO+kbD+kbE) then  { VGAMODE }
             begin
               PaletteEffect := peEGAMode;
               RefreshPalette (Palette);
@@ -378,7 +371,6 @@ implementation
     InitLevelScore;
     FillChar (TotalBackGrAddr, SizeOf (TotalBackGrAddr), #0);
     ShowScore := FALSE;
-    ScoreTick := 0;
 
     if not Turbo then
     begin
@@ -701,15 +693,15 @@ implementation
         ClearVGAMem;
 
         case PipeCode [1] of
-          #$E0: begin
+          'à': begin
                  FindPipeExit;
-                 SDL_Delay (100);
+                 Delay (100);
                end;
-          #$E1: begin
+          'á': begin
                  Swap;
                  FindPipeExit;
                end;
-          #$E7: begin
+          'ç': begin
                  GameDone := True;
                  PlayWorld := True;
                end;
@@ -724,10 +716,10 @@ implementation
         for i := 0 to MAX_PAGE do
           LastXView [i] := XView;
 
-        if PipeCode [1] in [#$E0] then
+        if PipeCode [1] in ['à'] then
           GoTo Restart
         else
-          if PipeCode [1] in [#$E1] then
+          if PipeCode [1] in ['á'] then
             GoTo BuildLevel;
       end;
     until GameDone or QuitGame;

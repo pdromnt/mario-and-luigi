@@ -1,166 +1,70 @@
-# Mario & Luigi - SDL2 Port
+# Legacy - Original DOS Source & Assets
 
-![Mario & Luigi - Latest Build Screenshot](https://cdn.planetmagpie.net/mario.png)
+This directory contains the original DOS source code and game assets for **Mario & Luigi** by Mike Wiering (1994), along with the Python conversion tools used to create the SDL2 port.
 
-A faithful port of **Mario & Luigi** (1994) by Mike Wiering from DOS (Turbo Pascal + VGA Mode 13h) to modern Windows using **SDL2** and **Free Pascal**.
+These files are preserved for reference. The playable SDL2 port lives in `../sdl2_port/`.
 
-The original game is a side-scrolling platformer for DOS featuring 6 worlds, two-player mode (Mario & Luigi), enemies, power-ups, pipes, and PC speaker sound effects. This port preserves all gameplay, visuals, and audio identically while replacing all DOS/hardware-specific code with SDL2 equivalents.  
-  
-This port was made based on the original [MARIOSRC.ZIP](https://wieringsoftware.nl/mario/MARIOSRC.ZIP) release, not based on the GitHub repo that was featured on Hacker News recently.  
-  
-You can play the original on the [Internet Archive's DOSBOX for browsers](https://archive.org/details/msdos_Mario_and_Luigi_2001).  
-  
-## Building
+## Original Source Code
 
-### Requirements
+The `.PAS` files are the original Turbo Pascal source, targeting DOS with VGA Mode 13h and x86 inline assembly. They require Turbo Pascal 7.0 or Borland Pascal and a DOS environment (or DOSBox) to compile.
 
-- [Free Pascal Compiler 3.2.2+](https://www.freepascal.org/) (i386/Win32)
-- [SDL2 development library](https://github.com/libsdl-org/SDL/releases) (`SDL2.dll`, included)
-- [SDL2-for-Pascal](https://github.com/PascalGameDevelopment/SDL2-for-Pascal) bindings (included in `SDL2-for-Pascal/`)
+| File           | Description                                    |
+|----------------|------------------------------------------------|
+| `MARIO.PAS`    | Main program                                   |
+| `VGA256.PAS`   | VGA graphics engine (Mode 13h, inline asm)     |
+| `PLAY.PAS`     | Game loop                                      |
+| `KEYBOARD.PAS` | INT 09h keyboard handler                       |
+| `MUSIC.PAS`    | PC speaker music (ports $42/$43/$61)           |
+| `BUFFERS.PAS`  | Game state, types, DOS timer                   |
+| `PALETTES.PAS` | VGA palette management                         |
+| `FIGURES.PAS`  | Tile/sprite initialization                     |
+| `BACKGR.PAS`   | Background rendering                           |
+| `PLAYERS.PAS`  | Player movement & rendering                    |
+| `ENEMIES.PAS`  | Enemy AI & rendering                           |
+| `TMPOBJ.PAS`   | Temporary objects (fireballs, particles)       |
+| `BLOCKS.PAS`   | Breakable/bouncing blocks                      |
+| `GLITTER.PAS`  | Sparkle effects                                |
+| `STARS.PAS`    | Background star field                          |
+| `STATUS.PAS`   | HUD status bar                                 |
+| `TXT.PAS`      | Text rendering                                 |
+| `WORLDS.PAS`   | World/level data (assembler `db`/`dw` blocks)  |
+| `JOYSTICK.PAS` | Joystick input (port $201)                     |
+| `CPU286.PAS`   | 286 CPU detection                              |
 
-### Compile
+## Game Assets
 
-Run the build script:
+- **`.$00` / `.$01` / `.$02`...** — Raw VGA planar sprite data (4-plane format)
+- **`.000` / `.001` / `.002`...** — Sprite metadata
+- **`*.BK`** — Background image data
+- **`DEFAULT.PAL`** — VGA palette
+- **`MPAL256`** — 256-color palette data
+- **`DEMOKEYS.OBJ`** — Pre-recorded demo keystroke data (linked into the original executable)
 
-```bat
-build.bat
-```
+## Utilities
 
-Or compile manually:
+| File          | Description                           |
+|---------------|---------------------------------------|
+| `BIN2PAS.EXE` | Converts binary files to Pascal typed constants (DOS) |
+| `GRED.EXE`    | Game/sprite editor (DOS)              |
 
-```bat
-fpc -Mtp -Sg -FuSDL2-for-Pascal MARIO.PAS
-```
+## Documentation
 
-Place `SDL2.dll` in the same directory as `MARIO.exe` and run.
+| File        | Description                     |
+|-------------|---------------------------------|
+| `README.TXT`| Original game readme            |
+| `MARIO.TXT` | Game information                |
+| `GRED.TXT`  | Sprite/level editor manual      |
 
-### Compiler Flags
+## Conversion Tools (`tools/`)
 
-| Flag   | Purpose                                              |
-|--------|------------------------------------------------------|
-| `-Mtp` | Turbo Pascal mode (`Integer` = 16-bit, matches original overflow behavior) |
-| `-Sg`  | Allow `goto` statements (used in game loop)          |
-| `-Fu`  | Unit search path for SDL2-for-Pascal bindings        |
+These Python 3 scripts were used during the porting process to convert the original DOS-format data into Pascal typed constants for the SDL2 port.
 
-## What Was Ported
+| Script                 | Description                                                       |
+|------------------------|-------------------------------------------------------------------|
+| `convert_sprites.py`   | Converts VGA planar sprite files (`.$00`, `.000`) to linear byte-per-pixel `.inc` files |
+| `extract_worlds.py`    | Extracts level/world data from assembler `db`/`dw` blocks in `WORLDS.PAS` to byte arrays |
+| `extract_demokeys.py`  | Extracts demo keystroke data from `DEMOKEYS.OBJ` to a typed constant |
+| `extract_font.py`      | Extracts the Swiss bitmap font data to a typed constant            |
+| `extract_asm_data.py`  | General-purpose assembler data block extractor                     |
 
-The original game used extensive x86 inline assembly and direct hardware access. Every hardware-dependent component was rewritten in pure Pascal + SDL2:
-
-### Graphics (VGA256.PAS)
-- **VGA Mode 13h planar rendering** &rarr; Linear byte framebuffer arrays
-- **Hardware page flipping** (CRTC registers) &rarr; Two software framebuffer pages
-- **Hardware scrolling** (CRTC start address) &rarr; Viewport offset applied during presentation
-- **VGA palette registers** (ports $3C8/$3C9) &rarr; SDL palette arrays, converted to ARGB during rendering
-- **PushBackGr/PopBackGr** (VGA latch-copy sprite save/restore) &rarr; Heap-based stack with byte array storage
-- **All drawing primitives** (DrawImage, PutImage, Fill, etc.) &rarr; Pure Pascal framebuffer operations
-- Renders to a 320x182 software surface, scaled 3x to a 960x546 window via SDL2 renderer
-
-### Input (KEYBOARD.PAS)
-- **INT 09h keyboard interrupt handler** &rarr; SDL2 event polling
-- **Direct port $60/$61 scancode reading** &rarr; SDL scancode-to-AT-scancode mapping
-- **Demo recording/playback** from linked OBJ file &rarr; Typed constant array extracted from DEMOKEYS.OBJ
-
-### Audio (MUSIC.PAS + BUFFERS.PAS)
-- **PC speaker via ports $42/$43/$61** &rarr; SDL2 audio callback generating square waves at 44100 Hz
-- Music sequence player with note sustain tracking to match PC speaker behavior
-- Sound effect priority system ensuring one-shot beeps survive the audio callback timing
-
-### Joystick (JOYSTICK.PAS)
-- **Direct port $201 polling** &rarr; SDL2 joystick API
-
-### Timing
-- **DOS timer tick** (`$0000:$046C`) &rarr; `SDL_GetTicks div 55`
-- **Frame pacing** &rarr; 14ms minimum per frame (~71 fps, matching original DOS speed)
-
-### Sprite Data
-- **VGA planar format** (`.$00` files with inline `asm db` blocks) &rarr; Linear byte-per-pixel format (`.000` files converted to typed constants via Python scripts)
-- 170+ sprite include files auto-generated from original game assets
-
-### Level Data (WORLDS.PAS)
-- **Assembler `db`/`dw` blocks** in procedures &rarr; Typed constant byte arrays extracted via Python script
-
-### Other Replacements
-- `uses Crt` (Sound/NoSound/Delay) &rarr; SDL2 audio + SDL_Delay
-- `CPU286` unit &rarr; Empty stub
-- `{$L DEMOKEYS.OBJ}` &rarr; Extracted to typed constant
-- VGA vertical blanking (CRTC SetYStart/SetYEnd) &rarr; Window sized to exact content area
-- Executable name checksum protection &rarr; Removed
-
-## Running
-
-All game assets (sprites, levels, fonts, palettes) are compiled directly into the executable as typed constants. To run the game standalone you only need two files:
-
-| File        | Description                          |
-|-------------|--------------------------------------|
-| `MARIO.exe` | Game executable (all data embedded)  |
-| `SDL2.dll`  | SDL2 runtime library                 |
-
-Place both files in the same folder and run `MARIO.exe`.
-
-## Controls
-
-### Menu
-| Key             | Action              |
-|-----------------|----------------------|
-| Up / Down       | Navigate menu        |
-| Enter           | Select               |
-| Escape          | Back / Quit          |
-
-### Gameplay
-| Key             | Action              |
-|-----------------|----------------------|
-| Left / Right    | Move                 |
-| Alt             | Jump                 |
-| Ctrl / Space    | Run / Fire (fire mode) |
-| Down            | Duck / Enter pipe    |
-| Up              | Look up / Enter pipe |
-| P               | Pause                |
-| S               | Toggle status bar    |
-| Q               | Toggle sound on/off  |
-| Escape          | Quit                 |
-
-Joystick is also supported.
-
-## Levels
-
-The game features 6 worlds with a second harder "Turbo" loop after completion (12 progression stages total). See **[LEVELS.md](LEVELS.md)** for a complete level map, visual themes, pipe system details, and progression breakdown.
-
-## Project Structure
-
-```
-sdl2_port/
-  MARIO.PAS          Main program
-  PLAY.PAS           Game loop
-  VGA256.PAS         SDL2 graphics engine (core)
-  KEYBOARD.PAS       SDL2 input handling
-  MUSIC.PAS          SDL2 audio (square wave synthesis)
-  BUFFERS.PAS        Game state, types, shared audio vars
-  PALETTES.PAS       VGA palette management
-  FIGURES.PAS        Tile/sprite initialization & rendering
-  BACKGR.PAS         Background rendering (parallax, bricks, etc.)
-  PLAYERS.PAS        Player movement & rendering
-  ENEMIES.PAS        Enemy AI & rendering
-  TMPOBJ.PAS         Temporary objects (fireballs, particles)
-  BLOCKS.PAS         Breakable/bouncing blocks
-  GLITTER.PAS        Sparkle/particle effects
-  STARS.PAS          Background star field
-  STATUS.PAS         HUD status bar
-  TXT.PAS            Text rendering (Swiss bitmap font)
-  WORLDS.PAS         World/level data management
-  JOYSTICK.PAS       SDL2 joystick support
-  CPU286.PAS         Stub (originally 286 detection)
-  build.bat          Build script
-  icon.ico           Application icon
-  mario.rc           Windows resource script
-  sprites/           170 auto-generated sprite include files
-  data/              Level data, fonts, palettes, backgrounds
-  SDL2-for-Pascal/   SDL2 Pascal bindings (MPL/zlib licensed)
-```
-
-## Credits
-
-- The original game and its source code were created by Mike Wiering in 1994. All credit for the original code goes to its author. You can find the original source at [wieringsoftware.nl](https://wieringsoftware.nl/mario/).
-- **SDL2 Port**: Created with assistance from Claude (Anthropic)
-- **SDL2-for-Pascal**: PascalGameDevelopment community
-- The characters "Mario", "Luigi", and all related names, images, and concepts are the registered trademarks and copyright of **Nintendo Co., Ltd.** This project is **not affiliated with, authorized, or endorsed by Nintendo** in any way.
-- This project is strictly non-commercial. It is provided for free, and no profit is being made from its existence or distribution. Do not attempt to sell or commercialize this software.
+**Note:** `extract_worlds.py` must use `latin-1` encoding (not `cp1252`) when reading `WORLDS.PAS`, because enemy spawn codes in the `$80`-`$9F` byte range are corrupted by CP1252's remapping of those bytes to different Unicode codepoints.

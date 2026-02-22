@@ -4,7 +4,8 @@ interface
 
   uses
     VGA256,
-    Buffers;
+    Buffers,
+    Crt;
 
   procedure ClearGlitter;
   procedure NewGlitter (X, Y: Integer; NewAttr, Duration: Byte);
@@ -72,23 +73,68 @@ implementation
 
   procedure ShowGlitter;
   var
-    i: Integer;
-    Pg: Integer;
-    GX, GY: Integer;
+    i,
+    Page: Integer;
+    PageOffset: Word;
   begin
-    Pg := CurrentPage;
+    PageOffset := GetPageOffset;
+    Page := CurrentPage;
     if NumGlitter > 0 then
       for i := 1 to MaxGlitter do
         if Count [i] > Chr (MAX_PAGE + 1) then
-        begin
-          with GlitterList [i] do
-          begin
-            GY := Pos div VIR_SCREEN_WIDTH;
-            GX := Pos mod VIR_SCREEN_WIDTH;
-            BackGr [Pg] := GetPixel (GX, GY);
-            PutPixel (GX, GY, Attr);
-          end;
-        end
+          {
+            with GlitterList [i] do
+            begin
+              BackGr [WorkingPage] := GetPixel (XPos, YPos);
+              PutPixel (XPos, YPos, Attr);
+            end
+          }
+          asm
+                  push    es
+                  push    ds
+                  mov     ax, seg @Data
+                  mov     ds, ax
+                  mov     si, offset GlitterList
+                  mov     ax, VGA_SEGMENT
+                  mov     es, ax
+                  mov     bx, i
+                  dec     bx
+                  mov     cl, 3
+                  shl     bx, cl
+                  add     si, bx
+                  lodsb                   { Attr }
+                  push    ax
+                  lodsw                   { Pos }
+
+                  mov     di, ax
+                  shr     di, 1
+                  shr     di, 1
+                  add     di, PageOffset
+                  and     al, 3
+                  mov     cl, al
+
+                  mov     dx, GC_INDEX
+                  mov     ah, al
+                  mov     al, READ_MAP
+                  out     dx, ax
+
+                  seges
+                  mov     bl, [di]
+
+                  mov     ah, 1
+                  shl     ah, cl
+                  mov     dx, SC_INDEX
+                  mov     al, MAP_MASK
+                  out     dx, ax
+
+                  pop     ax
+                  stosb
+
+                  add     si, Page
+                  mov     [si], bl        { BackGr [Page] }
+                  pop     ds
+                  pop     es
+          end
         else
           if Count [i] > #0 then
             with GlitterList [i] do
@@ -97,25 +143,57 @@ implementation
 
   procedure HideGlitter;
   var
-    i: Integer;
-    Pg: Integer;
-    GX, GY: Integer;
+    i,
+    Page: Integer;
+    PageOffset: Word;
   begin
+    PageOffset := GetPageOffset;
     if NumGlitter = 0 then
       Exit;
-    Pg := CurrentPage;
+    Page := CurrentPage;
     for i := MaxGlitter downto 1 do
       if Count [i] > #0 then
       begin
+        {
         with GlitterList [i] do
-        begin
-          if BackGr [Pg] <> 0 then
-          begin
-            GY := Pos div VIR_SCREEN_WIDTH;
-            GX := Pos mod VIR_SCREEN_WIDTH;
-            PutPixel (GX, GY, BackGr [Pg]);
-          end;
-        end;
+          if BackGr [WorkingPage] <> 0 then
+            PutPixel (XPos, YPos, BackGr [WorkingPage]);
+        }
+            asm
+                  push    es
+                  push    ds
+                  mov     ax, seg @Data
+                  mov     ds, ax
+                  mov     si, offset GlitterList
+                  mov     ax, VGA_SEGMENT
+                  mov     es, ax
+                  mov     bx, i
+                  dec     bx
+                  mov     cl, 3
+                  shl     bx, cl
+                  add     si, bx
+                  lodsb                   { Attr }
+                  lodsw                   { Pos }
+                  mov     di, ax
+                  mov     cx, ax
+                  add     si, Page
+                  mov     bl, [si]        { BackGr [Page] }
+                  or      bl, bl
+                  jz      @1
+                  shr     di, 1
+                  shr     di, 1
+                  add     di, PageOffset
+                  mov     ah, 1
+                  and     cl, 3
+                  shl     ah, cl
+                  mov     dx, SC_INDEX
+                  mov     al, MAP_MASK
+                  out     dx, ax
+                  mov     al, bl
+                  stosb
+            @1:   pop     ds
+                  pop     es
+            end;
         Dec (Count [i]);
         if Count [i] = #0 then
           Dec (NumGlitter);
