@@ -27,6 +27,7 @@ program Mario;
     Txt,
     Music,
     BGMusic,
+    CustomLv,
     {$IFDEF UNIX}
     dos,
     {$ENDIF}
@@ -95,6 +96,8 @@ program Mario;
     CurPlayer: Integer;
     Passed,
     EndGame: Boolean;
+    TestPlayMode: Boolean;
+    TestPlayPath: string[255];
     Settings: SettingsData;
     Saves: SaveData;
     HiScores: HiScoreTable;
@@ -741,25 +744,33 @@ program Mario;
       i, j: Integer;
       S: String;
   begin
-    for i := 1 to ParamCount do
+    TestPlayMode := FALSE;
+    TestPlayPath := '';
+    i := 1;
+    while i <= ParamCount do
     begin
       S := ParamStr (i);
-      while S <> '' do
+      if (Length(S) >= 2) and (S[1] in ['/', '-']) then
       begin
-        if (Length (S) >= 2) and (S[1] in ['/', '-'])
-        then
-        begin
-          case UpCase (S[2]) of
-            'S': Play.Stat := TRUE;
-            'Q': BeeperOff;
-            'J': CalibrateJoystick;
-
+        case UpCase (S[2]) of
+          'S': Play.Stat := TRUE;
+          'Q': BeeperOff;
+          'J': CalibrateJoystick;
+          'T': begin
+            TestPlayMode := TRUE;
+            { Next parameter is the file path }
+            Delete(S, 1, 2);
+            if S <> '' then
+              TestPlayPath := S
+            else if i < ParamCount then
+            begin
+              Inc(i);
+              TestPlayPath := ParamStr(i);
+            end;
           end;
-          Delete (S, 1, 2);
-        end
-        else
-          Delete (S, 1, 1);
+        end;
       end;
+      Inc(i);
     end;
   end;
 
@@ -838,6 +849,8 @@ program Mario;
       TestVGAMode,
       Update: Boolean;
       PlayUserDemo: Boolean;
+      PlayCustom: Boolean;
+      CustomLevelIdx: Integer;
       Counter: Integer;
       MacroKey: Char;
       Status,
@@ -855,7 +868,8 @@ program Mario;
                    ST_DEMOS_MENU,
                    ST_DEMOS,
                    ST_DEMOS_DEL,
-                   ST_HISCORES);
+                   ST_HISCORES,
+                   ST_CUSTOM);
       Menu: array[1..7] of string[40];
       KeyVal: array[1..6] of string[14];   { Key name for ST_KEYS items }
       JSVal:  array[1..6] of string[14];   { Button name for ST_GAMEPAD items }
@@ -934,6 +948,8 @@ program Mario;
       TestVGAMode := FALSE;
       IntroDone := FALSE;
       PlayUserDemo := FALSE;
+      PlayCustom := FALSE;
+      CustomLevelIdx := 0;
       ShowHiScoreFromMenu := FALSE;
       NewData;
 
@@ -1005,12 +1021,12 @@ program Mario;
               begin
                  Menu[1] := 'START';
                  Menu[2] := 'REPLAYS';
-                 Menu[3] := 'HI-SCORES';
-                 Menu[4] := 'OPTIONS';
-                 Menu[5] := 'END';
-                 Menu[6] := '';
+                 Menu[3] := 'CUSTOM LEVELS';
+                 Menu[4] := 'HI-SCORES';
+                 Menu[5] := 'OPTIONS';
+                 Menu[6] := 'END';
                  Menu[7] := '';
-                 NumOptions := 5;
+                 NumOptions := 6;
                  LastStatus := ST_MENU;
                end;
             ST_OPTIONS:
@@ -1114,6 +1130,31 @@ program Mario;
                    Menu[i] := '';
                  NumOptions := NumDemos + 1;
                  LastStatus := ST_DEMOS_MENU;
+              end;
+            ST_CUSTOM:
+              begin
+                 if NumCustomLevels = 0 then
+                 begin
+                   Menu[1] := 'NO LEVELS FOUND';
+                   Menu[2] := 'BACK';
+                   for i := 3 to 7 do Menu[i] := '';
+                   NumOptions := 2;
+                 end
+                 else
+                 begin
+                   for i := 1 to NumCustomLevels do
+                   begin
+                     if i <= 6 then
+                       Menu[i] := CustomLevels[i].LevelName;
+                   end;
+                   if NumCustomLevels > 6 then
+                     NumOptions := 7
+                   else
+                     NumOptions := NumCustomLevels + 1;
+                   Menu[NumOptions] := 'BACK';
+                   for i := NumOptions + 1 to 7 do Menu[i] := '';
+                 end;
+                 LastStatus := ST_MENU;
               end;
             ST_START:
               begin
@@ -1320,9 +1361,13 @@ program Mario;
                   case Selected of
                     1: Status := ST_START;
                     2: Status := ST_DEMOS_MENU;
-                    3: ShowHiScoreFromMenu := TRUE;
-                    4: Status := ST_OPTIONS;
-                    5: begin
+                    3: begin
+                         ScanCustomLevels;
+                         Status := ST_CUSTOM;
+                       end;
+                    4: ShowHiScoreFromMenu := TRUE;
+                    5: Status := ST_OPTIONS;
+                    6: begin
                          IntroDone := TRUE;
                          QuitGame := TRUE;
                        end;
@@ -1397,6 +1442,20 @@ program Mario;
                     i := IOResult;  { Consume IOResult }
                     { Refresh: re-enter ST_DEMOS_DEL to rescan }
                     OldStatus := ST_NONE;
+                  end;
+
+                ST_CUSTOM:
+                  if NumCustomLevels = 0 then
+                  begin
+                    if Selected = 2 then
+                      Status := LastStatus;
+                  end
+                  else if Selected = NumOptions then
+                    Status := LastStatus
+                  else if (Selected >= 1) and (Selected <= NumCustomLevels) then
+                  begin
+                    PlayCustom := TRUE;
+                    CustomLevelIdx := Selected;
                   end;
 
                 ST_SOUND:
@@ -1533,7 +1592,7 @@ program Mario;
         { Only count toward demo timeout on the main menu }
         if Status = ST_MENU then
           Inc (Counter);
-      until IntroDone or PlayUserDemo or ShowHiScoreFromMenu
+      until IntroDone or PlayUserDemo or PlayCustom or ShowHiScoreFromMenu
         or (Counter = WAIT_BEFORE_DEMO);
       FadeDown (64);
 
@@ -1541,6 +1600,23 @@ program Mario;
       begin
         ShowHiScoreTable(FALSE);
         ShowHiScoreFromMenu := FALSE;
+        { Outer loop continues, re-entering Intro screen }
+      end
+      else if PlayCustom then
+      begin
+        PlayCustom := FALSE;
+        if LoadCustomLevel(CustomLevelIdx) then
+        begin
+          FadeDown(64);
+          NewData;
+          Data.NumPlayers := 1;
+          CurPlayer := plMario;
+          Passed := PlayWorld('x', 'C',
+            CustomMapA, CustomOptA, CustomOptA,
+            CustomMapB, CustomOptB, CustomOptB,
+            CurPlayer);
+          QuitGame := FALSE;  { Custom level exit is not a real quit }
+        end;
         { Outer loop continues, re-entering Intro screen }
       end
       else if not IntroDone then
@@ -1637,6 +1713,25 @@ begin  { Mario }
 
     InitPlayerFigures;
     InitEnemyFigures;
+    SaveSpriteBackups;
+    InitColoredSprites;  { Per-tile color variants for mixed pipes/bricks/etc. }
+    InitDecoSpritePalette;  { Fixed palette entries for design-independent deco }
+
+    { Test play mode: load level from path, play immediately, then exit }
+    if TestPlayMode and (TestPlayPath <> '') then
+    begin
+      if LoadCustomLevelByPath(TestPlayPath) then
+      begin
+        NewData;
+        Data.NumPlayers := 1;
+        CurPlayer := plMario;
+        Passed := PlayWorld('x', 'C',
+          CustomMapA, CustomOptA, CustomOptA,
+          CustomMapB, CustomOptB, CustomOptB,
+          CurPlayer);
+      end;
+      Halt(0);
+    end;
 
     EndGame := FALSE;
   {$IFDEF MENU}

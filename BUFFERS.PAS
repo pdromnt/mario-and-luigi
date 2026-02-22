@@ -11,7 +11,9 @@ interface
     VGA256;
 
   const
-    CanHoldYou    = [#0..#13, '0'..'Z'];
+    { Per-tile colored variants use codes #91-#126 (Green/Sand/Brown/Grass walls),
+      #139-#147 (Desert walls), and #178-#216 (pipes/blocks) }
+    CanHoldYou    = [#0..#13, '0'..'Z', #91..#126, #139..#147, #178..#216];
     CanStandOn    = [#14..#16, 'a'..'f'];
     Hidden        = ['$'];
 

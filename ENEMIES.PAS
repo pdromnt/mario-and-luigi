@@ -714,7 +714,7 @@ implementation
               Ch := WorldMap^ [NewX, l];
               if (XPos >= XView) and (XPos + W <= XView + NH * W) then
               case Ch of
-                'J': BreakBlock (NewX, l);
+                'J', #213..#216: BreakBlock (NewX, l);
                 '?': begin
                        case WorldMap^[NewX, l - 1] of
                          ' ': HitCoin (NewX * W, l * H, TRUE);

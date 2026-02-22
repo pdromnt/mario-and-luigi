@@ -29,6 +29,9 @@ Uses
   {$ENDIF}
   Math,
   SysUtils, ctypes,
+  {$IFDEF WINDOWS}
+  windows,
+  {$ENDIF}
   sdl2,
   glad_gl,
   PasImGui,
@@ -87,6 +90,70 @@ var
   BrowseSkyType: Integer = 0;   { Currently browsed sky type (0-12) }
   BrowseBgType: Integer = 0;    { Currently browsed background type }
   SkyBrowserDirty: Boolean = False; { True when browser selection changed }
+
+  { --- Sprint 2: Tile Editing State --- }
+  SelectedTileIdx: Integer = -1;      { Index into TileAtlas (-1 = none selected) }
+  SelectedEnemyIdx: Integer = -1;     { Index into EnemyAtlas (-1 = none selected) }
+  SelectedCharCode: Byte = 0;         { CharCode to write when painting }
+  SelectedTileName: AnsiString = '';   { Display name of selected tile }
+  SelectedIsEnemy: Boolean = False;    { True if selected from enemy palette }
+  IsPainting: Boolean = False;         { True while left-click dragging to paint }
+  IsErasing: Boolean = False;          { True while right-click dragging to erase }
+  LastPaintTileX: Integer = -1;        { Prevent redundant writes on same tile }
+  LastPaintTileY: Integer = -1;
+  EditorDirty: Boolean = False;        { Unsaved modifications flag }
+  ShowUnsavedPopup: Boolean = False;   { True when showing unsaved changes popup }
+  PendingLevelSwitch: Integer = -1;    { Level index to switch to after confirmation }
+
+  { Enemy drag-to-reposition state }
+  DraggingEnemy: Boolean = False;
+  DragEnemySrcX: Integer = -1;
+  DragEnemySrcY: Integer = -1;
+  DragEnemyChar: Char = #0;
+
+  { Player start drag-to-reposition state }
+  DraggingPlayerStart: Boolean = False;
+
+  { Pipe match code popup state }
+  ShowPipePopup: Boolean = False;
+  PipePopupTX: Integer = -1;
+  PipePopupTY: Integer = -1;
+  PipePopupMatchBuf: array[0..3] of AnsiChar;
+
+  { Level metadata char buffers (for ImGui.InputText) }
+  MetaNameBuf: array[0..127] of AnsiChar;
+  MetaCreatorBuf: array[0..63] of AnsiChar;
+  MetaDescBuf: array[0..255] of AnsiChar;
+
+  { F5 test play state }
+  {$IFDEF WINDOWS}
+  TestPlayActive: Boolean = False;
+  TestPlayProcessHandle: THandle = 0;
+  {$ENDIF}
+
+const
+  MAX_UNDO_STEPS = 200;
+  MAX_CHANGES_PER_STROKE = 512;
+  SAVE_FILE_NAME = 'level_edit.json';
+
+type
+  TTileChange = record
+    TileX, TileY: Integer;
+    OldChar, NewChar: Char;
+  end;
+
+  TUndoAction = record
+    Changes: array[0..MAX_CHANGES_PER_STROKE - 1] of TTileChange;
+    Count: Integer;
+  end;
+
+var
+  UndoStack: array[0..MAX_UNDO_STEPS - 1] of TUndoAction;
+  UndoTop: Integer = 0;        { Next free slot }
+  UndoBase: Integer = 0;       { Oldest valid entry }
+  RedoCount: Integer = 0;      { Redo-able actions above UndoTop }
+  CurrentStroke: TUndoAction;   { Accumulates changes during one paint drag }
+  StrokeActive: Boolean = False;
 
 { Pascal memory allocators for ImGui }
 function PasAllocMem(sz: NativeUInt; {%H-}user_data: Pointer): Pointer; cdecl;
@@ -175,6 +242,59 @@ begin
   CloseFile(F);
 end;
 
+{ Reset all editing state (undo stack, selection, dirty flag) }
+procedure ResetEditingState;
+begin
+  UndoTop := 0;
+  UndoBase := 0;
+  RedoCount := 0;
+  StrokeActive := False;
+  CurrentStroke.Count := 0;
+  SelectedTileIdx := -1;
+  SelectedEnemyIdx := -1;
+  SelectedCharCode := 0;
+  SelectedTileName := '';
+  SelectedIsEnemy := False;
+  IsPainting := False;
+  IsErasing := False;
+  LastPaintTileX := -1;
+  LastPaintTileY := -1;
+  EditorDirty := False;
+end;
+
+{ Copy metadata from EdRender's AnsiString vars into char buffers for ImGui.InputText }
+procedure SyncMetaBuffersFromEdRender;
+var
+  S: AnsiString;
+  L: Integer;
+begin
+  S := EdGetLevelName;
+  L := Length(S);
+  if L > SizeOf(MetaNameBuf) - 1 then L := SizeOf(MetaNameBuf) - 1;
+  FillChar(MetaNameBuf, SizeOf(MetaNameBuf), 0);
+  if L > 0 then Move(S[1], MetaNameBuf[0], L);
+
+  S := EdGetLevelCreator;
+  L := Length(S);
+  if L > SizeOf(MetaCreatorBuf) - 1 then L := SizeOf(MetaCreatorBuf) - 1;
+  FillChar(MetaCreatorBuf, SizeOf(MetaCreatorBuf), 0);
+  if L > 0 then Move(S[1], MetaCreatorBuf[0], L);
+
+  S := EdGetLevelDescription;
+  L := Length(S);
+  if L > SizeOf(MetaDescBuf) - 1 then L := SizeOf(MetaDescBuf) - 1;
+  FillChar(MetaDescBuf, SizeOf(MetaDescBuf), 0);
+  if L > 0 then Move(S[1], MetaDescBuf[0], L);
+end;
+
+{ Copy metadata from char buffers back to EdRender's AnsiString vars }
+procedure SyncMetaBuffersToEdRender;
+begin
+  EdSetLevelName(AnsiString(PAnsiChar(@MetaNameBuf[0])));
+  EdSetLevelCreator(AnsiString(PAnsiChar(@MetaCreatorBuf[0])));
+  EdSetLevelDescription(AnsiString(PAnsiChar(@MetaDescBuf[0])));
+end;
+
 procedure LoadSelectedLevel;
 var
   WorldIdx: Integer;
@@ -192,13 +312,257 @@ begin
   BrowseSkyType := EdGetSkyType;
   BrowseBgType := EdGetBackGrType;
   SkyBrowserDirty := False;
+  { Reset editing state on level switch }
+  ResetEditingState;
+  { Sync metadata buffers from EdRender }
+  SyncMetaBuffersFromEdRender;
 end;
+
+{ --- Undo/Redo System --- }
+
+procedure BeginStroke;
+begin
+  if not StrokeActive then
+  begin
+    CurrentStroke.Count := 0;
+    StrokeActive := True;
+  end;
+end;
+
+procedure FinalizeStroke;
+begin
+  if StrokeActive and (CurrentStroke.Count > 0) then
+  begin
+    UndoStack[UndoTop] := CurrentStroke;
+    UndoTop := (UndoTop + 1) mod MAX_UNDO_STEPS;
+    { If we wrapped around and caught up with UndoBase, advance base }
+    if UndoTop = UndoBase then
+      UndoBase := (UndoBase + 1) mod MAX_UNDO_STEPS;
+    RedoCount := 0;  { New action clears redo stack }
+  end;
+  StrokeActive := False;
+  CurrentStroke.Count := 0;
+end;
+
+procedure RecordTileChange(TileX, TileY: Integer; OldChar, NewChar: Char);
+begin
+  if CurrentStroke.Count < MAX_CHANGES_PER_STROKE then
+  begin
+    CurrentStroke.Changes[CurrentStroke.Count].TileX := TileX;
+    CurrentStroke.Changes[CurrentStroke.Count].TileY := TileY;
+    CurrentStroke.Changes[CurrentStroke.Count].OldChar := OldChar;
+    CurrentStroke.Changes[CurrentStroke.Count].NewChar := NewChar;
+    Inc(CurrentStroke.Count);
+  end;
+end;
+
+function CanUndo: Boolean;
+begin
+  Result := UndoTop <> UndoBase;
+end;
+
+function CanRedo: Boolean;
+begin
+  Result := RedoCount > 0;
+end;
+
+procedure DoUndo;
+var
+  Idx, i: Integer;
+begin
+  if not CanUndo then Exit;
+  { Move back one position }
+  Idx := (UndoTop - 1 + MAX_UNDO_STEPS) mod MAX_UNDO_STEPS;
+  UndoTop := Idx;
+  Inc(RedoCount);
+  { Apply changes in reverse }
+  for i := UndoStack[Idx].Count - 1 downto 0 do
+    EdSetTileAt(UndoStack[Idx].Changes[i].TileX,
+                UndoStack[Idx].Changes[i].TileY,
+                UndoStack[Idx].Changes[i].OldChar);
+  NeedRerender := True;
+  EditorDirty := True;
+end;
+
+procedure DoRedo;
+var
+  Idx, i: Integer;
+begin
+  if not CanRedo then Exit;
+  Idx := UndoTop;
+  { Re-apply changes }
+  for i := 0 to UndoStack[Idx].Count - 1 do
+    EdSetTileAt(UndoStack[Idx].Changes[i].TileX,
+                UndoStack[Idx].Changes[i].TileY,
+                UndoStack[Idx].Changes[i].NewChar);
+  UndoTop := (UndoTop + 1) mod MAX_UNDO_STEPS;
+  Dec(RedoCount);
+  NeedRerender := True;
+  EditorDirty := True;
+end;
+
+{ Place a tile at (TileX, TileY), recording for undo }
+procedure PlaceTile(TileX, TileY: Integer; NewChar: Char);
+var
+  OldChar: Char;
+begin
+  OldChar := EdGetTileAt(TileX, TileY);
+  if OldChar = NewChar then Exit;  { No change }
+  EdSetTileAt(TileX, TileY, NewChar);
+  RecordTileChange(TileX, TileY, OldChar, NewChar);
+  NeedRerender := True;
+  EditorDirty := True;
+end;
+
+{ Eyedropper: pick the tile under cursor and make it the selected tile }
+procedure EyedropperPick(TileX, TileY: Integer);
+var
+  Ch: Char;
+  i: Integer;
+  Entry: TTileAtlasEntry;
+  EnemyEntry: TEnemyAtlasEntry;
+begin
+  Ch := EdGetTileAt(TileX, TileY);
+  if Ch = ' ' then
+  begin
+    { Picked empty — deselect }
+    SelectedTileIdx := -1;
+    SelectedEnemyIdx := -1;
+    SelectedCharCode := 0;
+    SelectedTileName := 'Empty';
+    SelectedIsEnemy := False;
+    Exit;
+  end;
+
+  { Search enemy atlas first }
+  for i := 0 to EdGetEnemyAtlasCount - 1 do
+  begin
+    EnemyEntry := EdGetEnemyAtlasEntry(i);
+    if Chr(EnemyEntry.CharCode) = Ch then
+    begin
+      SelectedEnemyIdx := i;
+      SelectedTileIdx := -1;
+      SelectedCharCode := EnemyEntry.CharCode;
+      SelectedTileName := EnemyEntry.Name;
+      SelectedIsEnemy := True;
+      Exit;
+    end;
+  end;
+
+  { Search tile atlas }
+  for i := 0 to EdGetTileAtlasCount - 1 do
+  begin
+    Entry := EdGetTileAtlasEntry(i);
+    if Chr(Entry.CharCode) = Ch then
+    begin
+      SelectedTileIdx := i;
+      SelectedEnemyIdx := -1;
+      SelectedCharCode := Entry.CharCode;
+      SelectedTileName := Entry.Name;
+      SelectedIsEnemy := False;
+      Exit;
+    end;
+  end;
+
+  { Not found in either atlas — select raw char code }
+  SelectedTileIdx := -1;
+  SelectedEnemyIdx := -1;
+  SelectedCharCode := Ord(Ch);
+  SelectedTileName := '#' + IntToStr(Ord(Ch));
+  SelectedIsEnemy := False;
+end;
+
+{ Update the window title to reflect dirty state }
+procedure UpdateWindowTitle;
+var
+  Title: AnsiString;
+begin
+  Title := 'Mario && Luigi Level Editor';
+  if EditorDirty then
+    Title := '* ' + Title;
+  SDL_SetWindowTitle(Window, PAnsiChar(Title));
+end;
+
+{$IFDEF WINDOWS}
+{ Launch the game for test play — saves current level to temp file, runs MARIO.exe -T }
+procedure LaunchTestPlay;
+var
+  SI: STARTUPINFOA;
+  PI: PROCESS_INFORMATION;
+  TempDir, TempFile, GameExe, CmdLine, WorkDir: AnsiString;
+  EditorDir: AnsiString;
+begin
+  if TestPlayActive then Exit;
+
+  { Save active sub-level to buffer first }
+  EdSaveActiveToBuffer;
+  SyncMetaBuffersToEdRender;
+
+  { Determine temp file path }
+  TempDir := SysUtils.GetEnvironmentVariable('TEMP');
+  if TempDir = '' then
+    TempDir := SysUtils.GetEnvironmentVariable('TMP');
+  if TempDir = '' then
+    TempDir := '.';
+  TempFile := IncludeTrailingPathDelimiter(TempDir) + 'ml_editor_test.json';
+
+  { Save all sub-levels to temp JSON }
+  if not EdSaveLevelJSON(TempFile) then Exit;
+
+  { Find game executable relative to editor location }
+  { Editor is in sdl2_port/editor/OUT/EDITOR.exe }
+  { Game is in sdl2_port/OUT/MARIO.exe }
+  EditorDir := ExtractFilePath(ParamStr(0));
+  GameExe := EditorDir + '..\OUT\MARIO.exe';
+  if not FileExists(GameExe) then
+    GameExe := EditorDir + '..\..\OUT\MARIO.exe';
+  if not FileExists(GameExe) then
+    GameExe := EditorDir + '..\MARIO.exe';
+  if not FileExists(GameExe) then
+  begin
+    { Try current directory }
+    GameExe := 'MARIO.exe';
+    if not FileExists(GameExe) then Exit;
+  end;
+  GameExe := ExpandFileName(GameExe);
+
+  { Build command line }
+  CmdLine := '"' + GameExe + '" -T "' + TempFile + '"';
+  WorkDir := ExtractFilePath(GameExe);
+
+  { Launch the game process }
+  FillChar(SI, SizeOf(SI), 0);
+  SI.cb := SizeOf(SI);
+  FillChar(PI, SizeOf(PI), 0);
+
+  if CreateProcessA(nil, PAnsiChar(CmdLine), nil, nil, False,
+    0, nil, PAnsiChar(WorkDir), @SI, @PI) then
+  begin
+    TestPlayActive := True;
+    TestPlayProcessHandle := PI.hProcess;
+    CloseHandle(PI.hThread);
+  end;
+end;
+
+{ Check if the test play process has exited }
+procedure CheckTestPlayProcess;
+begin
+  if not TestPlayActive then Exit;
+  if WaitForSingleObject(TestPlayProcessHandle, 0) <> WAIT_TIMEOUT then
+  begin
+    CloseHandle(TestPlayProcessHandle);
+    TestPlayProcessHandle := 0;
+    TestPlayActive := False;
+  end;
+end;
+{$ENDIF}
 
 var
   { Hover info updated each frame }
   HoverTileX: Integer = -1;
   HoverTileY: Integer = -1;
   HoverTileChar: Char = ' ';
+  LastDirtyState: Boolean = False;  { Track dirty state changes for window title }
 
 { Check if the tile below (TileX, TileY) is a pipe top.
   Pipe action codes (#$E0..#$EF) are stored above pipe tops as paired markers. }
@@ -382,6 +746,10 @@ var
   SprP1, SprP2: ImVec2;
   SprUV0, SprUV1: ImVec2;
   SprDispW, SprDispH: Single;
+  ArrowTip, ArrowTop, ArrowBot: ImVec2;  { Enemy direction arrow }
+  OverlayAtlasIdx: Integer;
+  OverlayEntry: TTileAtlasEntry;
+  AtlasTexID: Pointer;
   PlayerTX, PlayerTY: Integer;
   TileName: AnsiString;
   BlockContent: AnsiString;
@@ -396,6 +764,21 @@ var
   PipeArrowTop, PipeArrowBL, PipeArrowBR: ImVec2;
   PipeBgR1, PipeBgR2: ImVec2;
   PipeLabelLen: Integer;
+  { Pipe warp connections }
+  PipeInfoTX: array[0..63] of Integer;
+  PipeInfoTY: array[0..63] of Integer;
+  PipeInfoAction: array[0..63] of Char;
+  PipeInfoMatch: array[0..63] of Char;
+  PipeInfoCX: array[0..63] of Single;
+  PipeInfoCY: array[0..63] of Single;
+  PipeCount: Integer;
+  PipeI, PipeJ: Integer;
+  BezP1, BezP2, BezC1, BezC2: ImVec2;
+  BezMid: ImVec2;
+  BezDist: Single;
+  PipeMatchLabel: array[0..3] of AnsiChar;
+  PipeConnColors: array[0..7] of LongWord;
+  PipeColorIdx: Integer;
   { Camera lock markers }
   CamLocks: array[0..31] of TCamLockEntry;
   CamLockCount: Integer;
@@ -406,6 +789,20 @@ var
   CamLockCol: LongWord;
   CamLockBgR1, CamLockBgR2: ImVec2;
   CamLockLineTop, CamLockLineBot: ImVec2;
+  { Tile editing — palette button IDs }
+  PalBtnID: AnsiString;
+  PalBgCol, PalTintCol: ImVec4;
+  IsSelected: Boolean;
+  { Tile editing — cursor preview }
+  PreviewUV0, PreviewUV1: ImVec2;
+  PreviewTexID: Pointer;
+  { Key modifier state }
+  KeyMods: Integer;
+  { Sub-level tab bar }
+  SubTabIdx: Integer;
+  SubTabOpen: Boolean;
+  SubTabName: AnsiString;
+  SubTabFlags: ImGuiTabItemFlags;
 begin
   { Start ImGui frame }
   ImGui_OpenGL3_NewFrame();
@@ -426,15 +823,56 @@ begin
         begin
           if ImGui.MenuItem(LevelNames[i], nil, i = CurrentLevel, True) then
           begin
-            CurrentLevel := i;
-            LoadSelectedLevel;
+            if EditorDirty then
+            begin
+              PendingLevelSwitch := i;
+              ShowUnsavedPopup := True;
+            end
+            else
+            begin
+              CurrentLevel := i;
+              LoadSelectedLevel;
+            end;
           end;
         end;
         ImGui.EndMenu();
       end;
       ImGui.Separator();
+      if ImGui.MenuItem('Save Level', 'Ctrl+S', False, True) then
+      begin
+        SyncMetaBuffersToEdRender;
+        if EdSaveLevelJSON(SAVE_FILE_NAME) then
+          EditorDirty := False;
+      end;
+      if ImGui.MenuItem('Load Level', 'Ctrl+O', False, True) then
+      begin
+        if EdLoadLevelJSON(SAVE_FILE_NAME) then
+        begin
+          NeedRerender := True;
+          BrowseSkyType := EdGetSkyType;
+          BrowseBgType := EdGetBackGrType;
+          SkyBrowserDirty := False;
+          ResetEditingState;
+          SyncMetaBuffersFromEdRender;
+        end;
+      end;
+      {$IFDEF WINDOWS}
+      ImGui.Separator();
+      if ImGui.MenuItem('Test Play', 'F5', False, EdIsLevelLoaded and (not TestPlayActive)) then
+        LaunchTestPlay;
+      {$ENDIF}
+      ImGui.Separator();
       if ImGui.MenuItem('Quit', 'Alt+F4', False, True) then
         Quit := True;
+      ImGui.EndMenu();
+    end;
+
+    if ImGui.BeginMenu('Edit', True) then
+    begin
+      if ImGui.MenuItem('Undo', 'Ctrl+Z', False, CanUndo) then
+        DoUndo;
+      if ImGui.MenuItem('Redo', 'Ctrl+Y', False, CanRedo) then
+        DoRedo;
       ImGui.EndMenu();
     end;
 
@@ -490,17 +928,103 @@ begin
     ImGui.EndPopup();
   end;
 
+  { --- Unsaved Changes Popup --- }
+  if ShowUnsavedPopup then
+  begin
+    ImGui.OpenPopup('Unsaved Changes##popup', ImGuiPopupFlags_None);
+    ShowUnsavedPopup := False;
+  end;
+  if ImGui.BeginPopupModal('Unsaved Changes##popup', nil, ImGuiWindowFlags_AlwaysAutoResize) then
+  begin
+    ImGui.Text('You have unsaved changes.');
+    ImGui.Text('Switch level anyway?');
+    ImGui.Separator();
+    if ImGui.Button('Yes, switch', ImVec2.New(120, 0)) then
+    begin
+      if PendingLevelSwitch >= 0 then
+      begin
+        CurrentLevel := PendingLevelSwitch;
+        PendingLevelSwitch := -1;
+        LoadSelectedLevel;
+      end;
+      ImGui.CloseCurrentPopup();
+    end;
+    ImGui.SameLine(0, 8);
+    if ImGui.Button('Cancel', ImVec2.New(120, 0)) then
+    begin
+      PendingLevelSwitch := -1;
+      ImGui.CloseCurrentPopup();
+    end;
+    ImGui.EndPopup();
+  end;
+
+  { --- Pipe Match Code Popup --- }
+  if ShowPipePopup then
+  begin
+    ImGui.OpenPopup('PipeMatchPopup', ImGuiPopupFlags_None);
+    ShowPipePopup := False;
+  end;
+  if ImGui.BeginPopup('PipeMatchPopup', ImGuiWindowFlags_AlwaysAutoResize) then
+  begin
+    ImGui.Text(AnsiString('Pipe at (' + IntToStr(PipePopupTX) + ', ' + IntToStr(PipePopupTY) + ')'));
+    { Show current action code }
+    if PipePopupTY > 0 then
+    begin
+      PipeAbove := EdGetTileAt(PipePopupTX, PipePopupTY - 1);
+      case PipeAbove of
+        #$E0: ImGui.Text('Action: WARP');
+        #$E1: ImGui.Text('Action: SWAP');
+        #$E7: ImGui.Text('Action: EXIT');
+      else
+        ImGui.Text('Action: None');
+      end;
+    end;
+    ImGui.Separator();
+    ImGui.Text('Match Code (1 char):');
+    ImGui.PushItemWidth(60);
+    ImGui.InputText('##MatchCode', @PipePopupMatchBuf[0], 2,
+      ImGuiInputTextFlags_None, nil, nil);
+    ImGui.PopItemWidth();
+    ImGui.SameLine(0, 8);
+    if ImGui.Button('Apply', ImVec2.New(60, 0)) then
+    begin
+      if (PipePopupTY > 0) and (PipePopupMatchBuf[0] <> #0) then
+      begin
+        BeginStroke;
+        PlaceTile(PipePopupTX + 1, PipePopupTY - 1, PipePopupMatchBuf[0]);
+        FinalizeStroke;
+        NeedRerender := True;
+      end;
+      ImGui.CloseCurrentPopup();
+    end;
+    ImGui.SameLine(0, 8);
+    if ImGui.Button('Clear', ImVec2.New(60, 0)) then
+    begin
+      if PipePopupTY > 0 then
+      begin
+        BeginStroke;
+        PlaceTile(PipePopupTX + 1, PipePopupTY - 1, ' ');
+        FinalizeStroke;
+        NeedRerender := True;
+      end;
+      ImGui.CloseCurrentPopup();
+    end;
+    ImGui.EndPopup();
+  end;
+
+  { --- Update window title when dirty state changes --- }
+  if EditorDirty <> LastDirtyState then
+  begin
+    LastDirtyState := EditorDirty;
+    UpdateWindowTitle;
+  end;
+
   { --- Tile Palette Panel (left column, top) --- }
   PalAvail.x := 280; PalAvail.y := 360;
   ImGui.SetNextWindowSize(PalAvail, ImGuiCond_FirstUseEver);
   ImGui.Begin_('Tile Palette', nil, ImGuiWindowFlags_None);
   if EdGetAtlasTexture <> 0 then
   begin
-    { Calculate how many tiles fit per row at 2x zoom (40px + 4px gap) }
-    PalAvail := ImGui.GetContentRegionAvail();
-    PalTilesPerRow := Trunc(PalAvail.x / 44);
-    if PalTilesPerRow < 1 then PalTilesPerRow := 1;
-
     PalTileSize.x := 40;  { 20 * 2x zoom }
     PalTileSize.y := 28;  { 14 * 2x zoom }
 
@@ -512,6 +1036,13 @@ begin
         if TabIdx = CAT_ENEMIES then Continue;
         if ImGui.BeginTabItem(PaletteTabNames[TabIdx], nil, ImGuiTabItemFlags_None) then
         begin
+          { Recalculate columns inside tab content area.
+            Use zero frame padding on buttons so width = image size exactly.
+            Each slot = image width + 2*1px border + gap. }
+          PalAvail := ImGui.GetContentRegionAvail();
+          ImGui.PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2.New(1, 1));
+          PalTilesPerRow := Trunc(PalAvail.x / (PalTileSize.x + 2 + 4));
+          if PalTilesPerRow < 1 then PalTilesPerRow := 1;
           PalColCount := 0;
           for PalTileIdx := 0 to EdGetTileAtlasCount - 1 do
           begin
@@ -525,10 +1056,26 @@ begin
             PalUV1.y := (PalEntry.AtlasRow + 1) / ATLAS_ROWS;
 
             TexID := Pointer(PtrUInt(EdGetAtlasTexture));
-            Tint.x := 1; Tint.y := 1; Tint.z := 1; Tint.w := 1;
-            Border.x := 0.3; Border.y := 0.3; Border.z := 0.3; Border.w := 1;
+            PalTintCol := ImVec4.New(1, 1, 1, 1);
 
-            ImGui.Image(TexID, PalTileSize, PalUV0, PalUV1, Tint, Border);
+            { Highlight selected tile with yellow border }
+            IsSelected := (not SelectedIsEnemy) and (SelectedTileIdx = PalTileIdx);
+            if IsSelected then
+              PalBgCol := ImVec4.New(1.0, 0.9, 0.0, 1.0)
+            else
+              PalBgCol := ImVec4.New(0.3, 0.3, 0.3, 1.0);
+
+            { Use ImageButton for click-to-select }
+            PalBtnID := 'tile_' + IntToStr(PalTileIdx);
+            if ImGui.ImageButton(PAnsiChar(PalBtnID), TexID, PalTileSize,
+              PalUV0, PalUV1, PalBgCol, PalTintCol) then
+            begin
+              SelectedTileIdx := PalTileIdx;
+              SelectedEnemyIdx := -1;
+              SelectedCharCode := PalEntry.CharCode;
+              SelectedTileName := PalEntry.Name;
+              SelectedIsEnemy := False;
+            end;
 
             { Tooltip on hover }
             if ImGui.IsItemHovered(ImGuiHoveredFlags_None) then
@@ -552,6 +1099,7 @@ begin
               PalColCount := 0;
           end;
 
+          ImGui.PopStyleVar(1);
           ImGui.EndTabItem();
         end;
       end;
@@ -567,6 +1115,88 @@ begin
   PalAvail.x := 720; PalAvail.y := 500;
   ImGui.SetNextWindowSize(PalAvail, ImGuiCond_FirstUseEver);
   ImGui.Begin_('Level Viewport', nil, ViewportFlags);
+
+  { --- Sub-level tab bar --- }
+  if EdGetNumSubLevels > 0 then
+  begin
+    if ImGui.BeginTabBar('SubLevelTabs', ImGuiTabBarFlags_AutoSelectNewTabs or
+                                          ImGuiTabBarFlags_Reorderable or
+                                          ImGuiTabBarFlags_FittingPolicyResizeDown) then
+    begin
+      for SubTabIdx := 0 to EdGetNumSubLevels - 1 do
+      begin
+        SubTabOpen := True;
+        SubTabName := EdGetSubLevelName(SubTabIdx);
+        if SubTabName = '' then
+          SubTabName := 'Sub-level ' + Chr(Ord('A') + SubTabIdx);
+
+        { Allow closing tabs only if more than 1 sub-level }
+        if EdGetNumSubLevels > 1 then
+          SubTabFlags := ImGuiTabItemFlags_None
+        else
+          SubTabFlags := ImGuiTabItemFlags_NoCloseWithMiddleMouseButton;
+
+        if ImGui.BeginTabItem(PAnsiChar(SubTabName), @SubTabOpen, SubTabFlags) then
+        begin
+          { This tab is selected — switch sub-level if needed }
+          if SubTabIdx <> EdGetActiveSubLevel then
+          begin
+            EdSwitchSubLevel(SubTabIdx);
+            NeedRerender := True;
+            ScrollX := 0;
+            { Reset undo stack }
+            UndoTop := 0;
+            UndoBase := 0;
+            RedoCount := 0;
+            StrokeActive := False;
+            { Reset selection state }
+            SelectedTileIdx := -1;
+            SelectedEnemyIdx := -1;
+            SelectedCharCode := 0;
+            SelectedTileName := '';
+            SelectedIsEnemy := False;
+            DraggingEnemy := False;
+            DraggingPlayerStart := False;
+            { Sync metadata buffers }
+            SyncMetaBuffersFromEdRender;
+          end;
+          ImGui.EndTabItem;
+        end;
+
+        { Handle tab close (X button via middle-click or p_open going false) }
+        if (not SubTabOpen) and (EdGetNumSubLevels > 1) then
+        begin
+          EdRemoveSubLevel(SubTabIdx);
+          NeedRerender := True;
+          UndoTop := 0;
+          UndoBase := 0;
+          RedoCount := 0;
+          StrokeActive := False;
+          SyncMetaBuffersFromEdRender;
+          Break;  { Tab indices shifted, re-render next frame }
+        end;
+      end;
+
+      { [+] button to add new sub-level }
+      if igTabItemButton('+', ImGuiTabItemFlags_Trailing or
+                               ImGuiTabItemFlags_NoTooltip) then
+      begin
+        if EdGetNumSubLevels < MAX_SUB_LEVELS then
+        begin
+          EdAddSubLevel;
+          NeedRerender := True;
+          ScrollX := 0;
+          UndoTop := 0;
+          UndoBase := 0;
+          RedoCount := 0;
+          StrokeActive := False;
+          SyncMetaBuffersFromEdRender;
+        end;
+      end;
+
+      ImGui.EndTabBar;
+    end;
+  end;
 
   LevelW := EdGetLevelWidth;
 
@@ -588,11 +1218,15 @@ begin
     Tint.x := 1; Tint.y := 1; Tint.z := 1; Tint.w := 1;
     Border.x := 0; Border.y := 0; Border.z := 0; Border.w := 0;
 
-    ImGui.Image(TexID, TexSize, UV0, UV1, Tint, Border);
+    { Get screen position BEFORE placing the widget — guaranteed correct }
+    ImgMin := ImGui.GetCursorScreenPos();
+    ImgMax.x := ImgMin.x + TexSize.x;
+    ImgMax.y := ImgMin.y + TexSize.y;
+    DrawList := ImGui.GetWindowDrawList();
 
-    { Get the actual screen rect of the image AFTER drawing it }
-    ImgMin := ImGui.GetItemRectMin();
-    ImgMax := ImGui.GetItemRectMax();
+    { InvisibleButton for reliable hover + click detection in docked windows }
+    ImGui.InvisibleButton('##viewport', TexSize);
+    DrawList^.AddImage(TexID, ImgMin, ImgMax, UV0, UV1, $FFFFFFFF);
 
     { Handle scrolling with mouse wheel when hovering the viewport image }
     if ImGui.IsItemHovered(ImGuiHoveredFlags_None) then
@@ -656,22 +1290,17 @@ begin
     { Sub-tile offset for grid alignment when scrolled mid-tile }
     SubTileOff := (ScrollX mod EdGetTileW) * ZoomLevel;
 
-    { Use the window draw list instead of the foreground draw list.
-      Window draw list draws within the window's Z-order (behind popups),
-      and since we add commands after ImGui.Image(), they appear on top of the image. }
-    DrawList := ImGui.GetWindowDrawList();
-
     { Compute hovered tile from mouse position }
     HoverTileX := -1;
     HoverTileY := -1;
     HoverTileChar := ' ';
 
-    { Get mouse position from ImGui IO (in window-local coords) }
-    MousePos := IO^.MousePos;
+    { Get mouse position — use ImGui.GetMousePos(), NOT IO^.MousePos which is broken (always 0,0) }
+    MousePos := ImGui.GetMousePos();
     RelX := MousePos.x - ImgMin.x;
     RelY := MousePos.y - ImgMin.y;
 
-    { Bounds check: is the mouse within the image rect? }
+    { Bounds check: is the mouse within the viewport image? }
     MouseInViewport := (MousePos.x >= ImgMin.x) and (MousePos.x < ImgMax.x) and
                         (MousePos.y >= ImgMin.y) and (MousePos.y < ImgMax.y);
 
@@ -687,36 +1316,253 @@ begin
           HoverTileY := 0;
         if (HoverTileX < 0) then
           HoverTileX := 0;
+        if (HoverTileX >= EdGetLevelXSize) then
+          HoverTileX := EdGetLevelXSize - 1;
         HoverTileChar := EdGetTileAt(HoverTileX, HoverTileY);
 
-        { Highlight hovered tile }
-        HighlightCol := $8000FFFF;  { semi-transparent yellow (ABGR) }
+        { Highlight hovered tile — cursor preview or plain highlight }
         HighRect1.x := ImgMin.x + (HoverTileX * EdGetTileW - ScrollX) * ZoomLevel;
         HighRect1.y := ImgMin.y + HoverTileY * TileH;
         HighRect2.x := HighRect1.x + TileW;
         HighRect2.y := HighRect1.y + TileH;
-        DrawList^.AddRectFilled(HighRect1, HighRect2, HighlightCol);
+
+        if (SelectedCharCode > 0) and (not SelectedIsEnemy) and (SelectedTileIdx >= 0) then
+        begin
+          { Show semi-transparent preview of selected tile }
+          PalEntry := EdGetTileAtlasEntry(SelectedTileIdx);
+          PreviewUV0.x := PalEntry.AtlasCol / ATLAS_COLS;
+          PreviewUV0.y := PalEntry.AtlasRow / ATLAS_ROWS;
+          PreviewUV1.x := (PalEntry.AtlasCol + 1) / ATLAS_COLS;
+          PreviewUV1.y := (PalEntry.AtlasRow + 1) / ATLAS_ROWS;
+          PreviewTexID := Pointer(PtrUInt(EdGetAtlasTexture));
+          DrawList^.AddImage(PreviewTexID, HighRect1, HighRect2,
+            PreviewUV0, PreviewUV1, $80FFFFFF);
+          DrawList^.AddRect(HighRect1, HighRect2, $FF00FFFF, 0, ImDrawFlags_None, 2.0);  { cyan border }
+        end
+        else if SelectedIsEnemy and (SelectedEnemyIdx >= 0) then
+        begin
+          { Show selected enemy sprite preview }
+          EnemyEntry := EdGetEnemyAtlasEntry(SelectedEnemyIdx);
+          PreviewUV0.x := (EnemyEntry.AtlasCol * ENEMY_CELL_W
+                          + (ENEMY_CELL_W - EnemyEntry.SprW) div 2) / ENEMY_ATLAS_PX_W;
+          PreviewUV0.y := (EnemyEntry.AtlasRow * ENEMY_CELL_H
+                          + (ENEMY_CELL_H - EnemyEntry.SprH) div 2) / ENEMY_ATLAS_PX_H;
+          PreviewUV1.x := PreviewUV0.x + EnemyEntry.SprW / ENEMY_ATLAS_PX_W;
+          PreviewUV1.y := PreviewUV0.y + EnemyEntry.SprH / ENEMY_ATLAS_PX_H;
+          PreviewTexID := Pointer(PtrUInt(EdGetEnemyAtlasTexture));
+          DrawList^.AddImage(PreviewTexID, HighRect1, HighRect2,
+            PreviewUV0, PreviewUV1, $80FFFFFF);
+          DrawList^.AddRect(HighRect1, HighRect2, $FF00FFFF, 0, ImDrawFlags_None, 2.0);
+        end
+        else if DraggingEnemy then
+        begin
+          { Show semi-transparent enemy sprite at cursor during drag }
+          EnemyIdx := EdFindEnemyAtlasIndex(DragEnemyChar);
+          if EnemyIdx >= 0 then
+          begin
+            EnemyEntry := EdGetEnemyAtlasEntry(EnemyIdx);
+            PreviewUV0.x := (EnemyEntry.AtlasCol * ENEMY_CELL_W
+                            + (ENEMY_CELL_W - EnemyEntry.SprW) div 2) / ENEMY_ATLAS_PX_W;
+            PreviewUV0.y := (EnemyEntry.AtlasRow * ENEMY_CELL_H
+                            + (ENEMY_CELL_H - EnemyEntry.SprH) div 2) / ENEMY_ATLAS_PX_H;
+            PreviewUV1.x := PreviewUV0.x + EnemyEntry.SprW / ENEMY_ATLAS_PX_W;
+            PreviewUV1.y := PreviewUV0.y + EnemyEntry.SprH / ENEMY_ATLAS_PX_H;
+            PreviewTexID := Pointer(PtrUInt(EdGetEnemyAtlasTexture));
+            DrawList^.AddImage(PreviewTexID, HighRect1, HighRect2,
+              PreviewUV0, PreviewUV1, $80FFFFFF);
+          end;
+          DrawList^.AddRect(HighRect1, HighRect2, $FF00FF00, 0, ImDrawFlags_None, 2.0);  { green border }
+        end
+        else if DraggingPlayerStart then
+        begin
+          { Show semi-transparent Mario sprite at cursor during drag }
+          if EdGetPlayerSpriteTexture <> 0 then
+          begin
+            SprUV0.x := 0; SprUV0.y := 0;
+            SprUV1.x := 1; SprUV1.y := 1;
+            DrawList^.AddImage(Pointer(PtrUInt(EdGetPlayerSpriteTexture)),
+              HighRect1, HighRect2, SprUV0, SprUV1, $80FFFFFF);
+          end;
+          DrawList^.AddRect(HighRect1, HighRect2, $FF00FF00, 0, ImDrawFlags_None, 2.0);  { green border }
+        end
+        else
+        begin
+          { No tile selected — plain yellow highlight }
+          HighlightCol := $8000FFFF;  { semi-transparent yellow (ABGR) }
+          DrawList^.AddRectFilled(HighRect1, HighRect2, HighlightCol);
+        end;
+
+        { --- Paint / Erase / Eyedropper --- }
+        KeyMods := Integer(SDL_GetModState());
+
+        { Alt+Left-click = eyedropper }
+        if ((KeyMods and Integer(KMOD_ALT)) <> 0) and ImGui.IsMouseClicked(ImGuiMouseButton_Left) then
+        begin
+          EyedropperPick(HoverTileX, HoverTileY);
+        end
+        { Shift+Left-click on pipe = open match code popup }
+        else if ((KeyMods and Integer(KMOD_SHIFT)) <> 0) and ImGui.IsMouseClicked(ImGuiMouseButton_Left) then
+        begin
+          { Check if clicking on or near a pipe top-left tile }
+          if (HoverTileChar = '0') or
+             ((HoverTileChar = '1') and (HoverTileX > 0) and (EdGetTileAt(HoverTileX - 1, HoverTileY) = '0')) then
+          begin
+            if HoverTileChar = '1' then
+              PipePopupTX := HoverTileX - 1
+            else
+              PipePopupTX := HoverTileX;
+            PipePopupTY := HoverTileY;
+            { Read current match code }
+            if PipePopupTY > 0 then
+            begin
+              FillChar(PipePopupMatchBuf, SizeOf(PipePopupMatchBuf), 0);
+              PipeAbove := EdGetTileAt(PipePopupTX + 1, PipePopupTY - 1);
+              if (PipeAbove <> ' ') and (PipeAbove <> #0) then
+                PipePopupMatchBuf[0] := PipeAbove;
+              ShowPipePopup := True;
+              ImGui.OpenPopup('PipeMatchPopup', ImGuiPopupFlags_None);
+            end;
+          end;
+        end
+        { Left-click drag = paint selected tile OR drag-reposition enemy/player start }
+        else if ImGui.IsMouseDown(ImGuiMouseButton_Left) and (not IsDragging) and
+           (not DraggingEnemy) and (not DraggingPlayerStart) and
+           ((KeyMods and Integer(KMOD_ALT)) = 0) then
+        begin
+          if SelectedCharCode > 0 then
+          begin
+            { Normal painting mode }
+            if not IsPainting then
+            begin
+              BeginStroke;
+              IsPainting := True;
+              LastPaintTileX := -1;
+              LastPaintTileY := -1;
+            end;
+            if (HoverTileX <> LastPaintTileX) or (HoverTileY <> LastPaintTileY) then
+            begin
+              PlaceTile(HoverTileX, HoverTileY, Chr(SelectedCharCode));
+              LastPaintTileX := HoverTileX;
+              LastPaintTileY := HoverTileY;
+            end;
+          end
+          else if ImGui.IsMouseClicked(ImGuiMouseButton_Left) then
+          begin
+            { No tile selected: check if clicking on player start or enemy to drag }
+            if (HoverTileX = EdGetPlayerStartX) and (HoverTileY = EdGetPlayerStartY) then
+            begin
+              DraggingPlayerStart := True;
+            end
+            else if HoverTileChar in [#$80, #$81, #$82, #$83,
+                                 #$84, #$85, #$86, #$87,
+                                 #$88, #$89, #$8A,
+                                 #$B0, #$B1] then
+            begin
+              DraggingEnemy := True;
+              DragEnemySrcX := HoverTileX;
+              DragEnemySrcY := HoverTileY;
+              DragEnemyChar := HoverTileChar;
+            end;
+          end;
+        end
+        { Continue dragging enemy or player start }
+        else if (DraggingEnemy or DraggingPlayerStart) and
+                ImGui.IsMouseDown(ImGuiMouseButton_Left) then
+        begin
+          { Visual feedback is handled below in the overlay section }
+        end;
+
+        { Right-click drag = erase (place space) }
+        if ImGui.IsMouseDown(ImGuiMouseButton_Right) and (not IsDragging) then
+        begin
+          if not IsErasing then
+          begin
+            BeginStroke;
+            IsErasing := True;
+            LastPaintTileX := -1;
+            LastPaintTileY := -1;
+          end;
+          if (HoverTileX <> LastPaintTileX) or (HoverTileY <> LastPaintTileY) then
+          begin
+            PlaceTile(HoverTileX, HoverTileY, ' ');
+            LastPaintTileX := HoverTileX;
+            LastPaintTileY := HoverTileY;
+          end;
+        end;
 
         { Tooltip with tile info }
-        ImGui.BeginTooltip();
-        TileName := GetTileName(HoverTileChar, HoverTileX, HoverTileY);
-        if TileName <> '' then
-          ImGui.Text(AnsiString(TileName));
-        ImGui.Text(AnsiString('(' + IntToStr(HoverTileX) + ', ' + IntToStr(HoverTileY) + ')'));
-        if Ord(HoverTileChar) >= 32 then
-          ImGui.Text(AnsiString('''' + HoverTileChar + ''' #' + IntToStr(Ord(HoverTileChar))))
-        else
-          ImGui.Text(AnsiString('#' + IntToStr(Ord(HoverTileChar)) + ' $' + IntToHex(Ord(HoverTileChar), 2)));
-        { Show block content for ? and $ blocks }
-        if HoverTileChar in ['?', '$'] then
+        if (not IsPainting) and (not IsErasing) then
         begin
-          BlockContent := GetBlockContent(HoverTileX, HoverTileY);
-          if BlockContent <> '' then
-            ImGui.TextColored(ImVec4.New(1.0, 0.9, 0.3, 1.0), AnsiString('Contains: ' + BlockContent))
+          ImGui.BeginTooltip();
+          TileName := GetTileName(HoverTileChar, HoverTileX, HoverTileY);
+          if TileName <> '' then
+            ImGui.Text(AnsiString(TileName));
+          ImGui.Text(AnsiString('(' + IntToStr(HoverTileX) + ', ' + IntToStr(HoverTileY) + ')'));
+          if Ord(HoverTileChar) >= 32 then
+            ImGui.Text(AnsiString('''' + HoverTileChar + ''' #' + IntToStr(Ord(HoverTileChar))))
           else
-            ImGui.TextColored(ImVec4.New(0.6, 0.6, 0.6, 1.0), 'Contains: Coin');
+            ImGui.Text(AnsiString('#' + IntToStr(Ord(HoverTileChar)) + ' $' + IntToHex(Ord(HoverTileChar), 2)));
+          { Show block content for ? and $ blocks }
+          if HoverTileChar in ['?', '$'] then
+          begin
+            BlockContent := GetBlockContent(HoverTileX, HoverTileY);
+            if BlockContent <> '' then
+              ImGui.TextColored(ImVec4.New(1.0, 0.9, 0.3, 1.0), AnsiString('Contains: ' + BlockContent))
+            else
+              ImGui.TextColored(ImVec4.New(0.6, 0.6, 0.6, 1.0), 'Contains: Coin');
+          end;
+          { Show selected tile info }
+          if SelectedCharCode > 0 then
+            ImGui.TextColored(ImVec4.New(0.3, 1.0, 0.3, 1.0), AnsiString('Paint: ' + SelectedTileName));
+          ImGui.EndTooltip();
         end;
-        ImGui.EndTooltip();
+    end;
+
+    { Finalize strokes when mouse released }
+    if IsPainting and (not ImGui.IsMouseDown(ImGuiMouseButton_Left)) then
+    begin
+      FinalizeStroke;
+      IsPainting := False;
+      LastPaintTileX := -1;
+      LastPaintTileY := -1;
+    end;
+    if IsErasing and (not ImGui.IsMouseDown(ImGuiMouseButton_Right)) then
+    begin
+      FinalizeStroke;
+      IsErasing := False;
+      LastPaintTileX := -1;
+      LastPaintTileY := -1;
+    end;
+    { Finalize enemy drag when mouse released }
+    if DraggingEnemy and (not ImGui.IsMouseDown(ImGuiMouseButton_Left)) then
+    begin
+      { Drop enemy at current hover tile (if valid and different from source) }
+      if (HoverTileX >= 0) and (HoverTileY >= 0) and
+         ((HoverTileX <> DragEnemySrcX) or (HoverTileY <> DragEnemySrcY)) then
+      begin
+        BeginStroke;
+        PlaceTile(DragEnemySrcX, DragEnemySrcY, ' ');
+        PlaceTile(HoverTileX, HoverTileY, DragEnemyChar);
+        FinalizeStroke;
+      end;
+      DraggingEnemy := False;
+      DragEnemySrcX := -1;
+      DragEnemySrcY := -1;
+      DragEnemyChar := #0;
+    end;
+    { Finalize player start drag when mouse released }
+    if DraggingPlayerStart and (not ImGui.IsMouseDown(ImGuiMouseButton_Left)) then
+    begin
+      if (HoverTileX >= 0) and (HoverTileY >= 0) and
+         (HoverTileX < EdGetLevelXSize) and (HoverTileY < EdGetNV) and
+         ((HoverTileX <> EdGetPlayerStartX) or (HoverTileY <> EdGetPlayerStartY)) then
+      begin
+        EdSetPlayerStartX(HoverTileX);
+        EdSetPlayerStartY(HoverTileY);
+        NeedRerender := True;
+        EditorDirty := True;
+      end;
+      DraggingPlayerStart := False;
     end;
 
     { Draw grid overlay — lines align to tile boundaries accounting for scroll }
@@ -760,7 +1606,8 @@ begin
       if LastTileX >= EdGetLevelXSize then
         LastTileX := EdGetLevelXSize - 1;
 
-      MarkerRadius := Min(TileW, TileH) * 0.35;
+      if TileW < TileH then MarkerRadius := TileW * 0.35
+      else MarkerRadius := TileH * 0.35;
       MarkerLabel[1] := #0;  { null terminator for label string }
       EnemyTexID := Pointer(PtrUInt(EdGetEnemyAtlasTexture));
 
@@ -819,7 +1666,50 @@ begin
             SprUV1.y := SprUV0.y + EnemyEntry.SprH / ENEMY_ATLAS_PX_H;
 
             DrawList^.AddImage(EnemyTexID, SprP1, SprP2, SprUV0, SprUV1, $FFFFFFFF);
+
+            { Draw direction arrow for walking enemies (they always walk left initially) }
+            if not (MarkerCh in [#$84, #$85, #$86,   { Piranha Plants }
+                                 #$81,                 { Fish (vertical) }
+                                 #$82,                 { Fireball (vertical) }
+                                 #$B0, #$B1]) then     { Lifts/platforms }
+            begin
+              { Small left-pointing triangle at the left side of the sprite }
+              ArrowTip.x := SprP1.x - 2 * ZoomLevel;
+              ArrowTip.y := (SprP1.y + SprP2.y) * 0.5;
+              ArrowTop.x := SprP1.x + 1 * ZoomLevel;
+              ArrowTop.y := ArrowTip.y - 3 * ZoomLevel;
+              ArrowBot.x := SprP1.x + 1 * ZoomLevel;
+              ArrowBot.y := ArrowTip.y + 3 * ZoomLevel;
+              DrawList^.AddTriangleFilled(ArrowTip, ArrowTop, ArrowBot, $CC00CCFF);
+            end;
+
             Continue;  { Don't fall through to marker drawing }
+          end;
+
+          { Palette-dependent deco tiles: draw from tile atlas as overlay
+            because Redraw uses wrong palette indices for these }
+          if EdNeedsOverlay(Ord(MarkerCh)) then
+          begin
+            OverlayAtlasIdx := EdFindTileAtlasIndex(Ord(MarkerCh));
+            if OverlayAtlasIdx >= 0 then
+            begin
+              OverlayEntry := EdGetTileAtlasEntry(OverlayAtlasIdx);
+              SprP1.x := ImgMin.x + (tx * EdGetTileW - ScrollX) * ZoomLevel;
+              SprP1.y := ImgMin.y + ty * EdGetTileH * ZoomLevel;
+              SprP2.x := SprP1.x + EdGetTileW * ZoomLevel;
+              SprP2.y := SprP1.y + EdGetTileH * ZoomLevel;
+
+              if (SprP2.x >= ImgMin.x) and (SprP1.x <= ImgMax.x) then
+              begin
+                AtlasTexID := Pointer(PtrUInt(EdGetAtlasTexture));
+                SprUV0.x := OverlayEntry.AtlasCol * EdGetTileW / ATLAS_PX_W;
+                SprUV0.y := OverlayEntry.AtlasRow * EdGetTileH / ATLAS_PX_H;
+                SprUV1.x := SprUV0.x + EdGetTileW / ATLAS_PX_W;
+                SprUV1.y := SprUV0.y + EdGetTileH / ATLAS_PX_H;
+                DrawList^.AddImage(AtlasTexID, SprP1, SprP2, SprUV0, SprUV1, $FFFFFFFF);
+              end;
+            end;
+            Continue;
           end;
 
           { For non-enemy marker tiles (hidden blocks), use the original marker style }
@@ -859,7 +1749,8 @@ begin
 
       { --- Question/Hidden block content indicators --- }
       ContentLabel[1] := #0;
-      ContentR := Min(TileW, TileH) * 0.22;
+      if TileW < TileH then ContentR := TileW * 0.22
+      else ContentR := TileH * 0.22;
       for tx := FirstTileX to LastTileX do
         for ty := 0 to EdGetNV - 1 do
         begin
@@ -957,6 +1848,84 @@ begin
           TextPos.x := MarkerCenter.x - TextSize.x * 0.5;
           TextPos.y := PipeBgR1.y + 1;
           DrawList^.AddText(TextPos, $FFFFFFFF, @PipeActionBuf[0], nil);
+        end;
+
+      { --- Pipe warp connection lines (bezier curves between matched pipes) --- }
+      PipeConnColors[0] := $CC00CC00;  { green }
+      PipeConnColors[1] := $CCFF8800;  { blue }
+      PipeConnColors[2] := $CC0088FF;  { orange }
+      PipeConnColors[3] := $CCFF00FF;  { magenta }
+      PipeConnColors[4] := $CC00FFFF;  { yellow }
+      PipeConnColors[5] := $CCFFCC00;  { cyan }
+      PipeConnColors[6] := $CC8800FF;  { purple }
+      PipeConnColors[7] := $CC00FF88;  { lime }
+
+      { Collect all warp/swap pipes across entire level (not just visible) }
+      PipeCount := 0;
+      for tx := 0 to EdGetLevelXSize - 1 do
+        for ty := 1 to EdGetNV - 1 do
+        begin
+          if PipeCount >= 64 then Break;
+          MarkerCh := EdGetTileAt(tx, ty);
+          if MarkerCh <> '0' then Continue;
+          PipeAbove := EdGetTileAt(tx, ty - 1);
+          if not (PipeAbove in [#$E0..#$EF]) then Continue;
+          PipeInfoTX[PipeCount] := tx;
+          PipeInfoTY[PipeCount] := ty;
+          PipeInfoAction[PipeCount] := PipeAbove;
+          { Match code is to the right of the action code }
+          PipeInfoMatch[PipeCount] := EdGetTileAt(tx + 1, ty - 1);
+          { Screen center }
+          PipeInfoCX[PipeCount] := ImgMin.x + (tx * EdGetTileW - ScrollX + EdGetTileW) * ZoomLevel;
+          PipeInfoCY[PipeCount] := ImgMin.y + (ty * EdGetTileH + EdGetTileH div 2) * ZoomLevel;
+          Inc(PipeCount);
+        end;
+
+      { Draw bezier curves between matched pipe pairs }
+      for PipeI := 0 to PipeCount - 2 do
+        for PipeJ := PipeI + 1 to PipeCount - 1 do
+        begin
+          if (PipeInfoMatch[PipeI] = PipeInfoMatch[PipeJ]) and
+             (PipeInfoMatch[PipeI] <> ' ') and (PipeInfoMatch[PipeI] <> #0) then
+          begin
+            BezP1.x := PipeInfoCX[PipeI];
+            BezP1.y := PipeInfoCY[PipeI];
+            BezP2.x := PipeInfoCX[PipeJ];
+            BezP2.y := PipeInfoCY[PipeJ];
+
+            { Arc upward — use a gentle fraction of distance, capped so
+              the curve stays within the viewport bounds }
+            BezDist := Abs(BezP2.x - BezP1.x) * 0.15;
+            if BezDist < 30 then BezDist := 30;
+            if BezDist > (ImgMax.y - ImgMin.y) * 0.4 then
+              BezDist := (ImgMax.y - ImgMin.y) * 0.4;
+
+            BezC1.x := BezP1.x;
+            BezC1.y := BezP1.y - BezDist;
+            BezC2.x := BezP2.x;
+            BezC2.y := BezP2.y - BezDist;
+
+            { Pick color based on match code }
+            PipeColorIdx := Ord(PipeInfoMatch[PipeI]) mod 8;
+            DrawList^.AddBezierCubic(BezP1, BezC1, BezC2, BezP2,
+              PipeConnColors[PipeColorIdx], 2.0, 20);
+
+            { Draw match code label at midpoint }
+            BezMid.x := (BezP1.x + BezP2.x) * 0.5;
+            BezMid.y := (BezC1.y + BezC2.y) * 0.5;
+            PipeMatchLabel[0] := PipeInfoMatch[PipeI];
+            PipeMatchLabel[1] := #0;
+            TextSize := ImGui.CalcTextSize(@PipeMatchLabel[0], nil, False, -1.0);
+            { Draw background rect }
+            PipeBgR1.x := BezMid.x - TextSize.x * 0.5 - 2;
+            PipeBgR1.y := BezMid.y - TextSize.y * 0.5 - 1;
+            PipeBgR2.x := BezMid.x + TextSize.x * 0.5 + 2;
+            PipeBgR2.y := BezMid.y + TextSize.y * 0.5 + 1;
+            DrawList^.AddRectFilled(PipeBgR1, PipeBgR2, PipeConnColors[PipeColorIdx]);
+            TextPos.x := BezMid.x - TextSize.x * 0.5;
+            TextPos.y := BezMid.y - TextSize.y * 0.5;
+            DrawList^.AddText(TextPos, $FFFFFFFF, @PipeMatchLabel[0], nil);
+          end;
         end;
 
       { --- Player start marker (always shown when markers enabled) --- }
@@ -1058,6 +2027,23 @@ begin
   else
     ImGui.Text(AnsiString('Music: level' + IntToStr(CurrentLevel div 2 + 1) + '.ogg'));
   ImGui.Separator();
+  { Level metadata fields }
+  ImGui.Text('-- Level Metadata --');
+  ImGui.PushItemWidth(-1);
+  ImGui.Text('Name:');
+  if ImGui.InputText('##MetaName', @MetaNameBuf[0], SizeOf(MetaNameBuf),
+    ImGuiInputTextFlags_None, nil, nil) then
+    EditorDirty := True;
+  ImGui.Text('Creator:');
+  if ImGui.InputText('##MetaCreator', @MetaCreatorBuf[0], SizeOf(MetaCreatorBuf),
+    ImGuiInputTextFlags_None, nil, nil) then
+    EditorDirty := True;
+  ImGui.Text('Description:');
+  if ImGui.InputText('##MetaDesc', @MetaDescBuf[0], SizeOf(MetaDescBuf),
+    ImGuiInputTextFlags_None, nil, nil) then
+    EditorDirty := True;
+  ImGui.PopItemWidth();
+  ImGui.Separator();
   ImGui.Text(AnsiString('Scroll: ' + IntToStr(ScrollX) + ' / ' + IntToStr(LevelW) + ' px'));
   ImGui.Text(AnsiString('Zoom: ' + IntToStr(ZoomLevel) + 'x'));
   ImGui.Separator();
@@ -1082,6 +2068,26 @@ begin
   end
   else
     ImGui.Text('Tile: -');
+  ImGui.Separator();
+  { Selected tile info }
+  if SelectedCharCode > 0 then
+  begin
+    ImGui.TextColored(ImVec4.New(0.3, 1.0, 0.3, 1.0), AnsiString('Selected: ' + SelectedTileName));
+    if SelectedCharCode >= 32 then
+      ImGui.Text(AnsiString('Code: ''' + Chr(SelectedCharCode) + ''' (#' + IntToStr(SelectedCharCode) + ')'))
+    else
+      ImGui.Text(AnsiString('Code: #' + IntToStr(SelectedCharCode) + ' ($' + IntToHex(SelectedCharCode, 2) + ')'));
+  end
+  else
+    ImGui.TextColored(ImVec4.New(0.6, 0.6, 0.6, 1.0), 'No tile selected');
+  if EditorDirty then
+    ImGui.TextColored(ImVec4.New(1.0, 0.4, 0.4, 1.0), '* Unsaved changes')
+  else
+    ImGui.TextColored(ImVec4.New(0.6, 0.6, 0.6, 1.0), 'No changes');
+  {$IFDEF WINDOWS}
+  if TestPlayActive then
+    ImGui.TextColored(ImVec4.New(0.3, 1.0, 1.0, 1.0), 'Test Play running...');
+  {$ENDIF}
   ImGui.End_();
 
   { --- Sky & Background Preview (right side, below Level Settings) --- }
@@ -1173,9 +2179,9 @@ begin
   begin
     EnemyTexID := Pointer(PtrUInt(EdGetEnemyAtlasTexture));
     PalAvail := ImGui.GetContentRegionAvail();
-    { Display sprites at 3× zoom (72×72 display per cell) }
-    PalTileSize.x := ENEMY_CELL_W * 3;
-    PalTileSize.y := ENEMY_CELL_H * 3;
+    { Display sprites at 2× zoom (48×48 display per cell) }
+    PalTileSize.x := ENEMY_CELL_W * 2;
+    PalTileSize.y := ENEMY_CELL_H * 2;
     PalColCount := Trunc(PalAvail.x / (PalTileSize.x + 8));
     if PalColCount < 1 then PalColCount := 1;
 
@@ -1190,9 +2196,25 @@ begin
       PalUV1.y := PalUV0.y + ENEMY_CELL_H / ENEMY_ATLAS_PX_H;
 
       ImGui.BeginGroup();
-      Tint.x := 1; Tint.y := 1; Tint.z := 1; Tint.w := 1;
-      Border.x := 0.3; Border.y := 0.3; Border.z := 0.3; Border.w := 0.5;
-      ImGui.Image(EnemyTexID, PalTileSize, PalUV0, PalUV1, Tint, Border);
+      PalTintCol := ImVec4.New(1, 1, 1, 1);
+
+      { Highlight selected enemy with yellow border }
+      IsSelected := SelectedIsEnemy and (SelectedEnemyIdx = i);
+      if IsSelected then
+        PalBgCol := ImVec4.New(1.0, 0.9, 0.0, 1.0)
+      else
+        PalBgCol := ImVec4.New(0.3, 0.3, 0.3, 0.5);
+
+      PalBtnID := 'enemy_' + IntToStr(i);
+      if ImGui.ImageButton(PAnsiChar(PalBtnID), EnemyTexID, PalTileSize,
+        PalUV0, PalUV1, PalBgCol, PalTintCol) then
+      begin
+        SelectedEnemyIdx := i;
+        SelectedTileIdx := -1;
+        SelectedCharCode := EnemyEntry.CharCode;
+        SelectedTileName := EnemyEntry.Name;
+        SelectedIsEnemy := True;
+      end;
 
       { Tooltip on hover }
       if ImGui.IsItemHovered(ImGuiHoveredFlags_None) then
@@ -1204,8 +2226,11 @@ begin
         ImGui.EndTooltip();
       end;
 
-      { Name label below sprite }
+      { Name label below sprite — constrain wrap to button width so
+        long names don't widen the group and break grid flow }
+      ImGui.PushTextWrapPos(ImGui.GetCursorPosX() + PalTileSize.x + 2);
       ImGui.TextWrapped(EnemyEntry.Name);
+      ImGui.PopTextWrapPos();
       ImGui.EndGroup();
 
       { Grid flow: SameLine unless at end of row }
@@ -1258,6 +2283,7 @@ var
   DisplayMode: TSDL_DisplayMode;
   SavedWinX, SavedWinY, SavedWinW, SavedWinH: Integer;
   SavedMaximized: Boolean;
+  MainKeyMods: Integer;
 
 begin
   { Set Pascal allocators for ImGui }
@@ -1390,29 +2416,77 @@ begin
       { Keyboard shortcuts }
       if (Event.type_ = SDL_KEYDOWN) then
       begin
-        case Event.key.keysym.sym of
-          SDLK_1: begin ZoomLevel := 1; NeedRerender := True; end;
-          SDLK_2: begin ZoomLevel := 2; NeedRerender := True; end;
-          SDLK_3: begin ZoomLevel := 3; NeedRerender := True; end;
-          SDLK_g: begin ShowGrid := not ShowGrid; end;
-          SDLK_m: begin ShowMarkers := not ShowMarkers; end;
-          SDLK_LEFT: begin
-            ScrollX := ScrollX - 20;
-            if ScrollX < 0 then ScrollX := 0;
-            NeedRerender := True;
-          end;
-          SDLK_RIGHT: begin
-            ScrollX := ScrollX + 20;
-            if EdGetLevelWidth > EdGetViewWidth then
-            begin
-              if ScrollX > EdGetLevelWidth - EdGetViewWidth then
-                ScrollX := EdGetLevelWidth - EdGetViewWidth;
+        MainKeyMods := Integer(Event.key.keysym.mod_);
+
+        { F5 — Test Play (works regardless of modifiers) }
+        {$IFDEF WINDOWS}
+        if (Event.key.keysym.sym = SDLK_F5) and EdIsLevelLoaded then
+          LaunchTestPlay;
+        {$ENDIF}
+
+        { Ctrl+key shortcuts }
+        if (MainKeyMods and Integer(KMOD_CTRL)) <> 0 then
+        begin
+          case Event.key.keysym.sym of
+            SDLK_z: DoUndo;
+            SDLK_y: DoRedo;
+            SDLK_s: begin
+              SyncMetaBuffersToEdRender;
+              if EdSaveLevelJSON(SAVE_FILE_NAME) then
+                EditorDirty := False;
             end;
-            NeedRerender := True;
+            SDLK_o: begin
+              if EdLoadLevelJSON(SAVE_FILE_NAME) then
+              begin
+                NeedRerender := True;
+                BrowseSkyType := EdGetSkyType;
+                BrowseBgType := EdGetBackGrType;
+                SkyBrowserDirty := False;
+                ResetEditingState;
+                SyncMetaBuffersFromEdRender;
+              end;
+            end;
+          end;
+        end
+        else
+        begin
+          case Event.key.keysym.sym of
+            SDLK_1: begin ZoomLevel := 1; NeedRerender := True; end;
+            SDLK_2: begin ZoomLevel := 2; NeedRerender := True; end;
+            SDLK_3: begin ZoomLevel := 3; NeedRerender := True; end;
+            SDLK_g: begin ShowGrid := not ShowGrid; end;
+            SDLK_m: begin ShowMarkers := not ShowMarkers; end;
+            SDLK_ESCAPE: begin
+              { Escape deselects current tile }
+              SelectedTileIdx := -1;
+              SelectedEnemyIdx := -1;
+              SelectedCharCode := 0;
+              SelectedTileName := '';
+              SelectedIsEnemy := False;
+            end;
+            SDLK_LEFT: begin
+              ScrollX := ScrollX - 20;
+              if ScrollX < 0 then ScrollX := 0;
+              NeedRerender := True;
+            end;
+            SDLK_RIGHT: begin
+              ScrollX := ScrollX + 20;
+              if EdGetLevelWidth > EdGetViewWidth then
+              begin
+                if ScrollX > EdGetLevelWidth - EdGetViewWidth then
+                  ScrollX := EdGetLevelWidth - EdGetViewWidth;
+              end;
+              NeedRerender := True;
+            end;
           end;
         end;
       end;
     end;
+
+    { Check if test play process has exited }
+    {$IFDEF WINDOWS}
+    CheckTestPlayProcess;
+    {$ENDIF}
 
     DrawGUI();
 

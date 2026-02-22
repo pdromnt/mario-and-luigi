@@ -417,6 +417,34 @@ implementation
     InPipe := False;
   end;
 
+  { Per-tile color pipe detection helpers }
+  function IsPipeTL(Ch: Char): Boolean;
+  begin
+    IsPipeTL := (Ch = '0') or
+      ((Ord(Ch) >= CPIPE_BASE) and (Ord(Ch) <= CPIPE_BASE + 23) and
+       ((Ord(Ch) - CPIPE_BASE) mod 4 = 0));
+  end;
+
+  function IsPipeTR(Ch: Char): Boolean;
+  begin
+    IsPipeTR := (Ch = '1') or
+      ((Ord(Ch) >= CPIPE_BASE) and (Ord(Ch) <= CPIPE_BASE + 23) and
+       ((Ord(Ch) - CPIPE_BASE) mod 4 = 1));
+  end;
+
+  { Per-tile color breakable/xblock detection helpers }
+  function IsBreakable(Ch: Char): Boolean;
+  begin
+    IsBreakable := (Ch = 'J') or
+      ((Ord(Ch) >= CBREAK_BASE) and (Ord(Ch) <= CBREAK_BASE + 3));
+  end;
+
+  function IsXBlock(Ch: Char): Boolean;
+  begin
+    IsXBlock := (Ch = 'X') or
+      ((Ord(Ch) >= CXBLOCK_BASE) and (Ord(Ch) <= CXBLOCK_BASE + 3));
+  end;
+
   procedure CheckPipeBelow;
   var
     Mo: Integer;
@@ -426,7 +454,7 @@ implementation
     Mo := X mod W;
     if not (Mo in [4 .. W - 4]) then
       Exit;
-    if (Below1 <> '0') or (Below2 <> '1')
+    if (not IsPipeTL(Below1)) or (not IsPipeTR(Below2))
       or (not (AtCh1 in [#$E0 .. #$E7]))   { $E0..$E7: Enter pipe }
       or (not (AtCh2 in [#$E0 .. #$EF])) then
         Exit;
@@ -442,7 +470,7 @@ implementation
     Mo := X mod W;
     if not (Mo in [4 .. W - 4]) then
       Exit;
-    if (C1 <> '0') or (C2 <> '1') then
+    if (not IsPipeTL(C1)) or (not IsPipeTR(C2)) then
       Exit;
     MapX := X div W;
     MapY := Y div H + 1;
@@ -722,9 +750,14 @@ implementation
             end;
             Case Ch of
               '=': cdHit := 1;
-              '0', '1': if keyUp then CheckPipeAbove (NewCh1, NewCh2);
+              '0', '1',
+              #178..#201:  { Original + colored pipes }
+                   if keyUp then
+                     if IsPipeTL(NewCh1) and IsPipeTR(NewCh2) then
+                       CheckPipeAbove (NewCh1, NewCh2);
 
-              '?', '$', 'J', 'K':
+              '?', '$', 'J', 'K',
+              #213..#216:  { Original + colored breakable blocks }
                    begin
                      Mo := 0;
                      case WorldMap^ [NewX2, NewY - 1] of
@@ -738,7 +771,7 @@ implementation
                               Ch := 'K';
                             end;
                        else
-                         if not Small and (Ch = 'J') then
+                         if not Small and IsBreakable(Ch) then
                          begin
                            BreakBlock (NewX2, NewY);
                            AddScore (10);
@@ -753,7 +786,7 @@ implementation
                      case WorldMap^ [NewX2, NewY - 1] of
                        ' ',
                        #$E3..#$EC:
-                            if not (Ch in ['J', 'K']) then
+                            if not (IsBreakable(Ch) or (Ch = 'K')) then
                             begin
                               HitCoin (NewX2 * W, NewY * H, True);
                               if WorldMap^ [NewX2, NewY - 1] <> ' ' then
@@ -782,7 +815,7 @@ implementation
                        WorldMap^ [NewX2, NewY] := 'K';
                      end
                      else
-                       if (Ch <> 'J')
+                       if not IsBreakable(Ch)
                        then
                          if (not (WorldMap^ [NewX2, NewY - 1] in [#$E3..#$EC])) then
                          begin
@@ -795,7 +828,7 @@ implementation
               else
                 Beep (30);
             end;
-            if (Ch <> 'J') or (Data.Mode [Player] = mdSmall) then
+            if (not IsBreakable(Ch)) or (Data.Mode [Player] = mdSmall) then
             begin
               YVel := 0;
               Status := stFalling;
@@ -824,10 +857,10 @@ implementation
   begin
     if InPipe then
     begin
-      if WorldMap^ [MapX, MapY + 1] = '0' then
+      if IsPipeTL(WorldMap^ [MapX, MapY + 1]) then
         StartDemo (dmUpOutOfPipe)
       else
-        if WorldMap^ [MapX, MapY - 1] = '0' then
+        if IsPipeTL(WorldMap^ [MapX, MapY - 1]) then
           StartDemo (dmDownOutOfPipe);
       Exit;
     end;

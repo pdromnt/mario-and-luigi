@@ -18,7 +18,7 @@ unit EdRender;
 interface
 
 uses
-  glad_gl;
+  glad_gl, Buffers;
 
 { Initialize the editor renderer (create textures, etc.) }
 procedure EdRenderInit;
@@ -35,6 +35,7 @@ procedure EdRenderLevel(ScrollX: Integer);
 
 { Get the OpenGL texture ID for ImGui.Image() }
 function EdGetLevelTexture: GLuint;
+function EdIsLevelLoaded: Boolean;
 
 { Get level width in pixels }
 function EdGetLevelWidth: Integer;
@@ -46,6 +47,10 @@ function EdGetViewHeight: Integer;
 { Get tile character at world tile coordinates }
 function EdGetTileAt(TileX, TileY: Integer): Char;
 
+{ Set tile character at world tile coordinates; returns old char.
+  Returns #0 if coordinates are out of bounds. }
+function EdSetTileAt(TileX, TileY: Integer; NewChar: Char): Char;
+
 { Get tile width and height in pixels }
 function EdGetTileW: Integer;
 function EdGetTileH: Integer;
@@ -53,9 +58,11 @@ function EdGetTileH: Integer;
 { Get number of vertical tiles }
 function EdGetNV: Integer;
 
-{ Get player start position (tile coordinates) }
+{ Get/set player start position (tile coordinates) }
 function EdGetPlayerStartX: Integer;
 function EdGetPlayerStartY: Integer;
+procedure EdSetPlayerStartX(TileX: Integer);
+procedure EdSetPlayerStartY(TileY: Integer);
 
 { Get level XSize (number of horizontal tiles) }
 function EdGetLevelXSize: Integer;
@@ -65,6 +72,14 @@ function EdGetSkyType: Integer;
 function EdGetBackGrType: Integer;
 function EdGetClouds: Integer;
 function EdGetHorizon: Integer;
+
+{ Level metadata getters/setters }
+function EdGetLevelName: AnsiString;
+procedure EdSetLevelName(const S: AnsiString);
+function EdGetLevelCreator: AnsiString;
+procedure EdSetLevelCreator(const S: AnsiString);
+function EdGetLevelDescription: AnsiString;
+procedure EdSetLevelDescription(const S: AnsiString);
 
 { --- Tile Atlas for Palette Panel --- }
 
@@ -172,6 +187,12 @@ function EdGetEnemyAtlasEntry(Index: Integer): TEnemyAtlasEntry;
 { Find enemy atlas index for a given tile character, or -1 if not found }
 function EdFindEnemyAtlasIndex(Ch: Char): Integer;
 
+{ Find tile atlas index for a given char code, or -1 if not found }
+function EdFindTileAtlasIndex(CharCode: Byte): Integer;
+
+{ Check if a tile char code needs overlay rendering (palette-dependent deco) }
+function EdNeedsOverlay(CharCode: Byte): Boolean;
+
 { --- Camera Lock Markers --- }
 
 const
@@ -200,15 +221,80 @@ procedure EdBuildPlayerSprite;
 { Get player sprite texture ID for ImGui }
 function EdGetPlayerSpriteTexture: GLuint;
 
+{ --- Save/Load (.mled binary format) --- }
+
+{ Save current level to a .mled binary file. Returns True on success. }
+function EdSaveLevel(const FileName: AnsiString): Boolean;
+
+{ Load a level from a .mled binary file. Returns True on success.
+  Re-initializes rendering (sky, walls, pipes, background, palette). }
+function EdLoadLevelFromFile(const FileName: AnsiString): Boolean;
+
+{ --- Save/Load (JSON format) --- }
+
+{ Save current level to a JSON file. Returns True on success. }
+function EdSaveLevelJSON(const FileName: AnsiString): Boolean;
+
+{ Load a level from a JSON file. Returns True on success.
+  Re-initializes rendering (sky, walls, pipes, background, palette). }
+function EdLoadLevelJSON(const FileName: AnsiString): Boolean;
+
+{ --- Sub-Level Management --- }
+
+const
+  MAX_SUB_LEVELS = 8;
+
+{ Get the number of sub-levels in the current level }
+function EdGetNumSubLevels: Integer;
+
+{ Get the index of the currently active sub-level (0-based) }
+function EdGetActiveSubLevel: Integer;
+
+{ Switch to a different sub-level (saves current, loads target, reinits rendering) }
+procedure EdSwitchSubLevel(Index: Integer);
+
+{ Add a new empty sub-level. Returns the index of the new sub-level, or -1 if full. }
+function EdAddSubLevel: Integer;
+
+{ Remove a sub-level by index. Cannot remove the last remaining sub-level. }
+procedure EdRemoveSubLevel(Index: Integer);
+
+{ Get/set the display name of a sub-level }
+function EdGetSubLevelName(Index: Integer): AnsiString;
+procedure EdSetSubLevelName(Index: Integer; const S: AnsiString);
+
+{ Save the currently active sub-level's state to its buffer.
+  Call this before saving to file or before any operation that needs
+  all sub-level buffers to be up-to-date. }
+procedure EdSaveActiveToBuffer;
+
 implementation
 
 uses
   SysUtils,
-  VGA256, Buffers, Figures, BackGr, Worlds, Palettes, Enemies;
+  VGA256, Figures, BackGr, Worlds, Palettes, Enemies;
 
 { Small Mario standing sprite — included directly to avoid pulling in Players unit.
   Sprite faces left; we flip it horizontally when building the texture. }
 {$I ..\sprites\SWMAR000.inc}
+
+{ --- Sub-Level Buffer Data --- }
+
+type
+  TSubLevelData = record
+    WorldSnap: WorldBuffer;     { Full WorldBuffer snapshot }
+    Opts: WorldOptions;         { Theme/options for this sub-level }
+    TabName: AnsiString;        { Tab display name (e.g. "Level A") }
+    SLMetaName: AnsiString;     { Level name }
+    SLMetaCreator: AnsiString;
+    SLMetaDescription: AnsiString;
+  end;
+  PSubLevelData = ^TSubLevelData;
+
+var
+  SubLevels: array[0..MAX_SUB_LEVELS - 1] of PSubLevelData;
+  NumSubLevels: Integer = 0;
+  ActiveSubLevel: Integer = 0;
 
 const
   { Viewport dimensions match the game }
@@ -222,161 +308,192 @@ const
     Brick colors:  $18(Gray) $30(Brown) $48(Blue) $B0(Red)
     Wood colors:   $18(Gray) $30(Brown) $48(Blue)
     XBlock colors: $30(Brown) $68(Orange) $A0(LtGreen) $B0(Red) }
-  TILE_ATLAS_COUNT = 112;
+  TILE_ATLAS_COUNT = 138;
   TileAtlas: array[0..TILE_ATLAS_COUNT - 1] of TTileAtlasEntry = (
-    { === ROW 0: Ground wall types (body/top/corner) === }
-    { Current level's ground (cols 0-2) }
-    (CharCode: Ord('C'); Name: 'Ground (body)';   Category: CAT_GROUND; AtlasCol:  0; AtlasRow: 0; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
-    (CharCode: Ord('C'); Name: 'Ground (top)';    Category: CAT_GROUND; AtlasCol:  1; AtlasRow: 0; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
-    (CharCode: Ord('C'); Name: 'Ground (corner)'; Category: CAT_GROUND; AtlasCol:  2; AtlasRow: 0; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
-    { Green wall type 0 (cols 3-5) }
-    (CharCode: Ord('C'); Name: 'Green (body)';    Category: CAT_GROUND; AtlasCol:  3; AtlasRow: 0; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
-    (CharCode: Ord('C'); Name: 'Green (top)';     Category: CAT_GROUND; AtlasCol:  4; AtlasRow: 0; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
-    (CharCode: Ord('C'); Name: 'Green (corner)';  Category: CAT_GROUND; AtlasCol:  5; AtlasRow: 0; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
-    { Sand wall type 1 (cols 6-8) }
-    (CharCode: Ord('C'); Name: 'Sand (body)';     Category: CAT_GROUND; AtlasCol:  6; AtlasRow: 0; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
-    (CharCode: Ord('C'); Name: 'Sand (top)';      Category: CAT_GROUND; AtlasCol:  7; AtlasRow: 0; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
-    (CharCode: Ord('C'); Name: 'Sand (corner)';   Category: CAT_GROUND; AtlasCol:  8; AtlasRow: 0; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
-    { Brown wall type 3 (cols 9-11) }
-    (CharCode: Ord('C'); Name: 'Brown (body)';    Category: CAT_GROUND; AtlasCol:  9; AtlasRow: 0; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
-    (CharCode: Ord('C'); Name: 'Brown (top)';     Category: CAT_GROUND; AtlasCol: 10; AtlasRow: 0; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
-    (CharCode: Ord('C'); Name: 'Brown (corner)';  Category: CAT_GROUND; AtlasCol: 11; AtlasRow: 0; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
-    { Grass wall type 4 (cols 12-14) }
-    (CharCode: Ord('C'); Name: 'Grass (body)';    Category: CAT_GROUND; AtlasCol: 12; AtlasRow: 0; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
-    (CharCode: Ord('C'); Name: 'Grass (top)';     Category: CAT_GROUND; AtlasCol: 13; AtlasRow: 0; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
-    (CharCode: Ord('C'); Name: 'Grass (corner)';  Category: CAT_GROUND; AtlasCol: 14; AtlasRow: 0; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
-    { === ROW 1: Ground cont + Platforms === }
-    { Desert wall type 5 (cols 0-2) }
-    (CharCode: Ord('C'); Name: 'Desert (body)';   Category: CAT_GROUND; AtlasCol:  0; AtlasRow: 1; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
-    (CharCode: Ord('C'); Name: 'Desert (top)';    Category: CAT_GROUND; AtlasCol:  1; AtlasRow: 1; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
-    (CharCode: Ord('C'); Name: 'Desert (corner)'; Category: CAT_GROUND; AtlasCol:  2; AtlasRow: 1; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
-    { Platforms (cols 3-6) }
-    (CharCode: 14;       Name: 'Platform (left)';  Category: CAT_PLATFORM; AtlasCol: 3; AtlasRow: 1; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
-    (CharCode: 15;       Name: 'Platform (mid)';   Category: CAT_PLATFORM; AtlasCol: 4; AtlasRow: 1; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
-    (CharCode: 16;       Name: 'Platform (right)'; Category: CAT_PLATFORM; AtlasCol: 5; AtlasRow: 1; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
-    (CharCode: Ord('='); Name: 'Pin';              Category: CAT_PLATFORM; AtlasCol: 6; AtlasRow: 1; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
-    { Static blocks (cols 7-12) }
-    (CharCode: Ord('?'); Name: 'Question Block'; Category: CAT_BLOCKS; AtlasCol:  7; AtlasRow: 1; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
-    (CharCode: Ord('@'); Name: 'Used Block';     Category: CAT_BLOCKS; AtlasCol:  8; AtlasRow: 1; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
-    (CharCode: Ord('$'); Name: 'Hidden Block';   Category: CAT_BLOCKS; AtlasCol:  9; AtlasRow: 1; IsMarker: True;  MarkerLab: '?'; MarkerCol: $80FFFFFF; ColorType: CT_NONE; ColorVal: 0),
-    (CharCode: Ord('I'); Name: 'Solid Block';    Category: CAT_BLOCKS; AtlasCol: 10; AtlasRow: 1; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
-    (CharCode: Ord('K'); Name: 'Note Block';     Category: CAT_BLOCKS; AtlasCol: 11; AtlasRow: 1; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
-    { Items (cols 12-14) }
-    (CharCode: Ord('*'); Name: 'Coin';           Category: CAT_ITEMS; AtlasCol: 12; AtlasRow: 1; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
-    (CharCode: 254;      Name: 'Flag (top)';     Category: CAT_ITEMS; AtlasCol: 13; AtlasRow: 1; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
-    (CharCode: 255;      Name: 'Flag (pole)';    Category: CAT_ITEMS; AtlasCol: 14; AtlasRow: 1; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    { === ROW 0-2: Per-tile ground wall variants (5 styles x 9 variants = 45) === }
+    { Variant order: TL(0) Top(1) TR(2) Left(3) Body(4) Right(5) BL(6) Bot(7) BR(8) }
+    { Green style — codes #91..#99 (row 0, cols 0-8) }
+    (CharCode:  91; Name: 'Green TL';      Category: CAT_GROUND; AtlasCol:  0; AtlasRow: 0; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode:  92; Name: 'Green Top';     Category: CAT_GROUND; AtlasCol:  1; AtlasRow: 0; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode:  93; Name: 'Green TR';      Category: CAT_GROUND; AtlasCol:  2; AtlasRow: 0; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode:  94; Name: 'Green Left';    Category: CAT_GROUND; AtlasCol:  3; AtlasRow: 0; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode:  95; Name: 'Green Body';    Category: CAT_GROUND; AtlasCol:  4; AtlasRow: 0; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode:  96; Name: 'Green Right';   Category: CAT_GROUND; AtlasCol:  5; AtlasRow: 0; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode:  97; Name: 'Green BL';      Category: CAT_GROUND; AtlasCol:  6; AtlasRow: 0; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode:  98; Name: 'Green Bot';     Category: CAT_GROUND; AtlasCol:  7; AtlasRow: 0; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode:  99; Name: 'Green BR';      Category: CAT_GROUND; AtlasCol:  8; AtlasRow: 0; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    { Sand style — codes #100..#108 (row 0 cols 9-15, row 1 cols 0-1) }
+    (CharCode: 100; Name: 'Sand TL';       Category: CAT_GROUND; AtlasCol:  9; AtlasRow: 0; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: 101; Name: 'Sand Top';      Category: CAT_GROUND; AtlasCol: 10; AtlasRow: 0; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: 102; Name: 'Sand TR';       Category: CAT_GROUND; AtlasCol: 11; AtlasRow: 0; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: 103; Name: 'Sand Left';     Category: CAT_GROUND; AtlasCol: 12; AtlasRow: 0; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: 104; Name: 'Sand Body';     Category: CAT_GROUND; AtlasCol: 13; AtlasRow: 0; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: 105; Name: 'Sand Right';    Category: CAT_GROUND; AtlasCol: 14; AtlasRow: 0; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: 106; Name: 'Sand BL';       Category: CAT_GROUND; AtlasCol: 15; AtlasRow: 0; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: 107; Name: 'Sand Bot';      Category: CAT_GROUND; AtlasCol:  0; AtlasRow: 1; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: 108; Name: 'Sand BR';       Category: CAT_GROUND; AtlasCol:  1; AtlasRow: 1; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    { Brown style — codes #109..#117 (row 1 cols 2-10) }
+    (CharCode: 109; Name: 'Brown TL';      Category: CAT_GROUND; AtlasCol:  2; AtlasRow: 1; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: 110; Name: 'Brown Top';     Category: CAT_GROUND; AtlasCol:  3; AtlasRow: 1; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: 111; Name: 'Brown TR';      Category: CAT_GROUND; AtlasCol:  4; AtlasRow: 1; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: 112; Name: 'Brown Left';    Category: CAT_GROUND; AtlasCol:  5; AtlasRow: 1; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: 113; Name: 'Brown Body';    Category: CAT_GROUND; AtlasCol:  6; AtlasRow: 1; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: 114; Name: 'Brown Right';   Category: CAT_GROUND; AtlasCol:  7; AtlasRow: 1; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: 115; Name: 'Brown BL';      Category: CAT_GROUND; AtlasCol:  8; AtlasRow: 1; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: 116; Name: 'Brown Bot';     Category: CAT_GROUND; AtlasCol:  9; AtlasRow: 1; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: 117; Name: 'Brown BR';      Category: CAT_GROUND; AtlasCol: 10; AtlasRow: 1; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    { Grass style — codes #118..#126 (row 1 cols 11-15, row 2 cols 0-3) }
+    (CharCode: 118; Name: 'Grass TL';      Category: CAT_GROUND; AtlasCol: 11; AtlasRow: 1; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: 119; Name: 'Grass Top';     Category: CAT_GROUND; AtlasCol: 12; AtlasRow: 1; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: 120; Name: 'Grass TR';      Category: CAT_GROUND; AtlasCol: 13; AtlasRow: 1; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: 121; Name: 'Grass Left';    Category: CAT_GROUND; AtlasCol: 14; AtlasRow: 1; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: 122; Name: 'Grass Body';    Category: CAT_GROUND; AtlasCol: 15; AtlasRow: 1; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: 123; Name: 'Grass Right';   Category: CAT_GROUND; AtlasCol:  0; AtlasRow: 2; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: 124; Name: 'Grass BL';      Category: CAT_GROUND; AtlasCol:  1; AtlasRow: 2; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: 125; Name: 'Grass Bot';     Category: CAT_GROUND; AtlasCol:  2; AtlasRow: 2; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: 126; Name: 'Grass BR';      Category: CAT_GROUND; AtlasCol:  3; AtlasRow: 2; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    { Desert style — codes #139..#147 (row 2 cols 4-12) }
+    (CharCode: 139; Name: 'Desert TL';     Category: CAT_GROUND; AtlasCol:  4; AtlasRow: 2; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: 140; Name: 'Desert Top';    Category: CAT_GROUND; AtlasCol:  5; AtlasRow: 2; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: 141; Name: 'Desert TR';     Category: CAT_GROUND; AtlasCol:  6; AtlasRow: 2; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: 142; Name: 'Desert Left';   Category: CAT_GROUND; AtlasCol:  7; AtlasRow: 2; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: 143; Name: 'Desert Body';   Category: CAT_GROUND; AtlasCol:  8; AtlasRow: 2; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: 144; Name: 'Desert Right';  Category: CAT_GROUND; AtlasCol:  9; AtlasRow: 2; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: 145; Name: 'Desert BL';     Category: CAT_GROUND; AtlasCol: 10; AtlasRow: 2; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: 146; Name: 'Desert Bot';    Category: CAT_GROUND; AtlasCol: 11; AtlasRow: 2; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: 147; Name: 'Desert BR';     Category: CAT_GROUND; AtlasCol: 12; AtlasRow: 2; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
 
-    { === ROW 2-3: Pipes — all 6 colors x 4 tiles = 24 entries === }
-    { Pipe color $18 (Gray) }
-    (CharCode: Ord('0'); Name: 'Pipe TL $18';  Category: CAT_PIPES; AtlasCol:  0; AtlasRow: 2; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_PIPE; ColorVal: $18),
-    (CharCode: Ord('1'); Name: 'Pipe TR $18';  Category: CAT_PIPES; AtlasCol:  1; AtlasRow: 2; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_PIPE; ColorVal: $18),
-    (CharCode: Ord('2'); Name: 'Pipe BL $18';  Category: CAT_PIPES; AtlasCol:  2; AtlasRow: 2; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_PIPE; ColorVal: $18),
-    (CharCode: Ord('3'); Name: 'Pipe BR $18';  Category: CAT_PIPES; AtlasCol:  3; AtlasRow: 2; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_PIPE; ColorVal: $18),
-    { Pipe color $30 (Green) }
-    (CharCode: Ord('0'); Name: 'Pipe TL $30';  Category: CAT_PIPES; AtlasCol:  4; AtlasRow: 2; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_PIPE; ColorVal: $30),
-    (CharCode: Ord('1'); Name: 'Pipe TR $30';  Category: CAT_PIPES; AtlasCol:  5; AtlasRow: 2; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_PIPE; ColorVal: $30),
-    (CharCode: Ord('2'); Name: 'Pipe BL $30';  Category: CAT_PIPES; AtlasCol:  6; AtlasRow: 2; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_PIPE; ColorVal: $30),
-    (CharCode: Ord('3'); Name: 'Pipe BR $30';  Category: CAT_PIPES; AtlasCol:  7; AtlasRow: 2; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_PIPE; ColorVal: $30),
-    { Pipe color $50 (Teal) }
-    (CharCode: Ord('0'); Name: 'Pipe TL $50';  Category: CAT_PIPES; AtlasCol:  8; AtlasRow: 2; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_PIPE; ColorVal: $50),
-    (CharCode: Ord('1'); Name: 'Pipe TR $50';  Category: CAT_PIPES; AtlasCol:  9; AtlasRow: 2; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_PIPE; ColorVal: $50),
-    (CharCode: Ord('2'); Name: 'Pipe BL $50';  Category: CAT_PIPES; AtlasCol: 10; AtlasRow: 2; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_PIPE; ColorVal: $50),
-    (CharCode: Ord('3'); Name: 'Pipe BR $50';  Category: CAT_PIPES; AtlasCol: 11; AtlasRow: 2; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_PIPE; ColorVal: $50),
-    { Pipe color $70 (Lime) }
-    (CharCode: Ord('0'); Name: 'Pipe TL $70';  Category: CAT_PIPES; AtlasCol: 12; AtlasRow: 2; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_PIPE; ColorVal: $70),
-    (CharCode: Ord('1'); Name: 'Pipe TR $70';  Category: CAT_PIPES; AtlasCol: 13; AtlasRow: 2; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_PIPE; ColorVal: $70),
-    (CharCode: Ord('2'); Name: 'Pipe BL $70';  Category: CAT_PIPES; AtlasCol: 14; AtlasRow: 2; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_PIPE; ColorVal: $70),
-    (CharCode: Ord('3'); Name: 'Pipe BR $70';  Category: CAT_PIPES; AtlasCol: 15; AtlasRow: 2; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_PIPE; ColorVal: $70),
-    { Pipe color $80 (Purple) }
-    (CharCode: Ord('0'); Name: 'Pipe TL $80';  Category: CAT_PIPES; AtlasCol:  0; AtlasRow: 3; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_PIPE; ColorVal: $80),
-    (CharCode: Ord('1'); Name: 'Pipe TR $80';  Category: CAT_PIPES; AtlasCol:  1; AtlasRow: 3; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_PIPE; ColorVal: $80),
-    (CharCode: Ord('2'); Name: 'Pipe BL $80';  Category: CAT_PIPES; AtlasCol:  2; AtlasRow: 3; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_PIPE; ColorVal: $80),
-    (CharCode: Ord('3'); Name: 'Pipe BR $80';  Category: CAT_PIPES; AtlasCol:  3; AtlasRow: 3; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_PIPE; ColorVal: $80),
-    { Pipe color $B0 (Red) }
-    (CharCode: Ord('0'); Name: 'Pipe TL $B0';  Category: CAT_PIPES; AtlasCol:  4; AtlasRow: 3; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_PIPE; ColorVal: $B0),
-    (CharCode: Ord('1'); Name: 'Pipe TR $B0';  Category: CAT_PIPES; AtlasCol:  5; AtlasRow: 3; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_PIPE; ColorVal: $B0),
-    (CharCode: Ord('2'); Name: 'Pipe BL $B0';  Category: CAT_PIPES; AtlasCol:  6; AtlasRow: 3; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_PIPE; ColorVal: $B0),
-    (CharCode: Ord('3'); Name: 'Pipe BR $B0';  Category: CAT_PIPES; AtlasCol:  7; AtlasRow: 3; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_PIPE; ColorVal: $B0),
+    { === ROW 3: Platforms + Static blocks + Items === }
+    { Platforms (cols 0-3) }
+    (CharCode: 14;       Name: 'Jump-thru TL';     Category: CAT_PLATFORM; AtlasCol: 0; AtlasRow: 3; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: 15;       Name: 'Jump-thru Top';    Category: CAT_PLATFORM; AtlasCol: 1; AtlasRow: 3; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: 16;       Name: 'Jump-thru TR';     Category: CAT_PLATFORM; AtlasCol: 2; AtlasRow: 3; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: Ord('='); Name: 'Spike';            Category: CAT_PLATFORM; AtlasCol: 3; AtlasRow: 3; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    { Static blocks (cols 4-8) }
+    (CharCode: Ord('?'); Name: 'Question Block'; Category: CAT_BLOCKS; AtlasCol:  4; AtlasRow: 3; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: Ord('@'); Name: 'Used Block';     Category: CAT_BLOCKS; AtlasCol:  5; AtlasRow: 3; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: Ord('$'); Name: 'Hidden Block';   Category: CAT_BLOCKS; AtlasCol:  6; AtlasRow: 3; IsMarker: True;  MarkerLab: '?'; MarkerCol: $80FFFFFF; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: Ord('I'); Name: 'Solid Block';    Category: CAT_BLOCKS; AtlasCol:  7; AtlasRow: 3; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: Ord('K'); Name: 'Note Block';     Category: CAT_BLOCKS; AtlasCol:  8; AtlasRow: 3; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    { Items (cols 9-11) }
+    (CharCode: Ord('*'); Name: 'Coin';           Category: CAT_ITEMS; AtlasCol:  9; AtlasRow: 3; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: 254;      Name: 'Flag (top)';     Category: CAT_ITEMS; AtlasCol: 10; AtlasRow: 3; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: 254;      Name: 'Flag (pole)';    Category: CAT_ITEMS; AtlasCol: 11; AtlasRow: 3; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
 
-    { === ROW 3 cols 8+, ROW 4: Bricks — 3 patterns x 4 colors = 12 entries === }
+    { === ROW 4-5: Pipes — all 6 colors x 4 tiles = 24 entries === }
+    { Per-tile colored pipes use unique char codes #178..#201 }
+    { Pipe color $18 (Gray) — codes #178..#181 }
+    (CharCode: 178; Name: 'Pipe TL Gray';    Category: CAT_PIPES; AtlasCol:  0; AtlasRow: 4; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_PIPE; ColorVal: $18),
+    (CharCode: 179; Name: 'Pipe TR Gray';    Category: CAT_PIPES; AtlasCol:  1; AtlasRow: 4; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_PIPE; ColorVal: $18),
+    (CharCode: 180; Name: 'Pipe BL Gray';    Category: CAT_PIPES; AtlasCol:  2; AtlasRow: 4; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_PIPE; ColorVal: $18),
+    (CharCode: 181; Name: 'Pipe BR Gray';    Category: CAT_PIPES; AtlasCol:  3; AtlasRow: 4; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_PIPE; ColorVal: $18),
+    { Pipe color $30 (Green) — codes #182..#185 }
+    (CharCode: 182; Name: 'Pipe TL Green';   Category: CAT_PIPES; AtlasCol:  4; AtlasRow: 4; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_PIPE; ColorVal: $30),
+    (CharCode: 183; Name: 'Pipe TR Green';   Category: CAT_PIPES; AtlasCol:  5; AtlasRow: 4; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_PIPE; ColorVal: $30),
+    (CharCode: 184; Name: 'Pipe BL Green';   Category: CAT_PIPES; AtlasCol:  6; AtlasRow: 4; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_PIPE; ColorVal: $30),
+    (CharCode: 185; Name: 'Pipe BR Green';   Category: CAT_PIPES; AtlasCol:  7; AtlasRow: 4; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_PIPE; ColorVal: $30),
+    { Pipe color $50 (Teal) — codes #186..#189 }
+    (CharCode: 186; Name: 'Pipe TL Teal';    Category: CAT_PIPES; AtlasCol:  8; AtlasRow: 4; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_PIPE; ColorVal: $50),
+    (CharCode: 187; Name: 'Pipe TR Teal';    Category: CAT_PIPES; AtlasCol:  9; AtlasRow: 4; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_PIPE; ColorVal: $50),
+    (CharCode: 188; Name: 'Pipe BL Teal';    Category: CAT_PIPES; AtlasCol: 10; AtlasRow: 4; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_PIPE; ColorVal: $50),
+    (CharCode: 189; Name: 'Pipe BR Teal';    Category: CAT_PIPES; AtlasCol: 11; AtlasRow: 4; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_PIPE; ColorVal: $50),
+    { Pipe color $70 (Lime) — codes #190..#193 }
+    (CharCode: 190; Name: 'Pipe TL Lime';    Category: CAT_PIPES; AtlasCol: 12; AtlasRow: 4; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_PIPE; ColorVal: $70),
+    (CharCode: 191; Name: 'Pipe TR Lime';    Category: CAT_PIPES; AtlasCol: 13; AtlasRow: 4; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_PIPE; ColorVal: $70),
+    (CharCode: 192; Name: 'Pipe BL Lime';    Category: CAT_PIPES; AtlasCol: 14; AtlasRow: 4; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_PIPE; ColorVal: $70),
+    (CharCode: 193; Name: 'Pipe BR Lime';    Category: CAT_PIPES; AtlasCol: 15; AtlasRow: 4; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_PIPE; ColorVal: $70),
+    { Pipe color $80 (Purple) — codes #194..#197 }
+    (CharCode: 194; Name: 'Pipe TL Purple';  Category: CAT_PIPES; AtlasCol:  0; AtlasRow: 5; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_PIPE; ColorVal: $80),
+    (CharCode: 195; Name: 'Pipe TR Purple';  Category: CAT_PIPES; AtlasCol:  1; AtlasRow: 5; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_PIPE; ColorVal: $80),
+    (CharCode: 196; Name: 'Pipe BL Purple';  Category: CAT_PIPES; AtlasCol:  2; AtlasRow: 5; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_PIPE; ColorVal: $80),
+    (CharCode: 197; Name: 'Pipe BR Purple';  Category: CAT_PIPES; AtlasCol:  3; AtlasRow: 5; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_PIPE; ColorVal: $80),
+    { Pipe color $B0 (Red) — codes #198..#201 }
+    (CharCode: 198; Name: 'Pipe TL Red';     Category: CAT_PIPES; AtlasCol:  4; AtlasRow: 5; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_PIPE; ColorVal: $B0),
+    (CharCode: 199; Name: 'Pipe TR Red';     Category: CAT_PIPES; AtlasCol:  5; AtlasRow: 5; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_PIPE; ColorVal: $B0),
+    (CharCode: 200; Name: 'Pipe BL Red';     Category: CAT_PIPES; AtlasCol:  6; AtlasRow: 5; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_PIPE; ColorVal: $B0),
+    (CharCode: 201; Name: 'Pipe BR Red';     Category: CAT_PIPES; AtlasCol:  7; AtlasRow: 5; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_PIPE; ColorVal: $B0),
+
+    { === ROW 5 cols 8+, ROW 6: Bricks — 3 patterns x 4 colors = 12 entries === }
+    { Per-tile colored bricks use unique char codes #202..#205 }
     { Brick Pattern 0 x 4 colors }
-    (CharCode: Ord('A'); Name: 'Brick0 $18';  Category: CAT_BRICKS; AtlasCol:  8; AtlasRow: 3; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_BRICK; ColorVal: $18),
-    (CharCode: Ord('A'); Name: 'Brick0 $30';  Category: CAT_BRICKS; AtlasCol:  9; AtlasRow: 3; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_BRICK; ColorVal: $30),
-    (CharCode: Ord('A'); Name: 'Brick0 $48';  Category: CAT_BRICKS; AtlasCol: 10; AtlasRow: 3; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_BRICK; ColorVal: $48),
-    (CharCode: Ord('A'); Name: 'Brick0 $B0';  Category: CAT_BRICKS; AtlasCol: 11; AtlasRow: 3; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_BRICK; ColorVal: $B0),
-    { Brick Pattern 1 x 4 colors }
-    (CharCode: Ord('A'); Name: 'Brick1 $18';  Category: CAT_BRICKS; AtlasCol: 12; AtlasRow: 3; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_BRICK; ColorVal: $18),
-    (CharCode: Ord('A'); Name: 'Brick1 $30';  Category: CAT_BRICKS; AtlasCol: 13; AtlasRow: 3; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_BRICK; ColorVal: $30),
-    (CharCode: Ord('A'); Name: 'Brick1 $48';  Category: CAT_BRICKS; AtlasCol: 14; AtlasRow: 3; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_BRICK; ColorVal: $48),
-    (CharCode: Ord('A'); Name: 'Brick1 $B0';  Category: CAT_BRICKS; AtlasCol: 15; AtlasRow: 3; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_BRICK; ColorVal: $B0),
-    { Brick Pattern 2 x 4 colors }
-    (CharCode: Ord('A'); Name: 'Brick2 $18';  Category: CAT_BRICKS; AtlasCol:  0; AtlasRow: 4; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_BRICK; ColorVal: $18),
-    (CharCode: Ord('A'); Name: 'Brick2 $30';  Category: CAT_BRICKS; AtlasCol:  1; AtlasRow: 4; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_BRICK; ColorVal: $30),
-    (CharCode: Ord('A'); Name: 'Brick2 $48';  Category: CAT_BRICKS; AtlasCol:  2; AtlasRow: 4; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_BRICK; ColorVal: $48),
-    (CharCode: Ord('A'); Name: 'Brick2 $B0';  Category: CAT_BRICKS; AtlasCol:  3; AtlasRow: 4; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_BRICK; ColorVal: $B0),
+    (CharCode: 202; Name: 'Brick0 Gray';   Category: CAT_BRICKS; AtlasCol:  8; AtlasRow: 5; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_BRICK; ColorVal: $18),
+    (CharCode: 203; Name: 'Brick0 Brown';  Category: CAT_BRICKS; AtlasCol:  9; AtlasRow: 5; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_BRICK; ColorVal: $30),
+    (CharCode: 204; Name: 'Brick0 Blue';   Category: CAT_BRICKS; AtlasCol: 10; AtlasRow: 5; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_BRICK; ColorVal: $48),
+    (CharCode: 205; Name: 'Brick0 Red';    Category: CAT_BRICKS; AtlasCol: 11; AtlasRow: 5; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_BRICK; ColorVal: $B0),
+    { Brick Pattern 1 x 4 colors (same char codes — pattern is cosmetic) }
+    (CharCode: 202; Name: 'Brick1 Gray';   Category: CAT_BRICKS; AtlasCol: 12; AtlasRow: 5; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_BRICK; ColorVal: $18),
+    (CharCode: 203; Name: 'Brick1 Brown';  Category: CAT_BRICKS; AtlasCol: 13; AtlasRow: 5; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_BRICK; ColorVal: $30),
+    (CharCode: 204; Name: 'Brick1 Blue';   Category: CAT_BRICKS; AtlasCol: 14; AtlasRow: 5; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_BRICK; ColorVal: $48),
+    (CharCode: 205; Name: 'Brick1 Red';    Category: CAT_BRICKS; AtlasCol: 15; AtlasRow: 5; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_BRICK; ColorVal: $B0),
+    { Brick Pattern 2 x 4 colors (same char codes — pattern is cosmetic) }
+    (CharCode: 202; Name: 'Brick2 Gray';   Category: CAT_BRICKS; AtlasCol:  0; AtlasRow: 6; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_BRICK; ColorVal: $18),
+    (CharCode: 203; Name: 'Brick2 Brown';  Category: CAT_BRICKS; AtlasCol:  1; AtlasRow: 6; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_BRICK; ColorVal: $30),
+    (CharCode: 204; Name: 'Brick2 Blue';   Category: CAT_BRICKS; AtlasCol:  2; AtlasRow: 6; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_BRICK; ColorVal: $48),
+    (CharCode: 205; Name: 'Brick2 Red';    Category: CAT_BRICKS; AtlasCol:  3; AtlasRow: 6; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_BRICK; ColorVal: $B0),
 
-    { === ROW 4 cols 4+: Color-variant blocks === }
-    { Breakable Block 'J' x 4 brick colors }
-    (CharCode: Ord('J'); Name: 'Break $18';   Category: CAT_BLOCKS; AtlasCol:  4; AtlasRow: 4; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_BRICK; ColorVal: $18),
-    (CharCode: Ord('J'); Name: 'Break $30';   Category: CAT_BLOCKS; AtlasCol:  5; AtlasRow: 4; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_BRICK; ColorVal: $30),
-    (CharCode: Ord('J'); Name: 'Break $48';   Category: CAT_BLOCKS; AtlasCol:  6; AtlasRow: 4; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_BRICK; ColorVal: $48),
-    (CharCode: Ord('J'); Name: 'Break $B0';   Category: CAT_BLOCKS; AtlasCol:  7; AtlasRow: 4; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_BRICK; ColorVal: $B0),
-    { Wood 'W' x 3 wood colors }
-    (CharCode: Ord('W'); Name: 'Wood $18';    Category: CAT_BLOCKS; AtlasCol:  8; AtlasRow: 4; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_WOOD;  ColorVal: $18),
-    (CharCode: Ord('W'); Name: 'Wood $30';    Category: CAT_BLOCKS; AtlasCol:  9; AtlasRow: 4; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_WOOD;  ColorVal: $30),
-    (CharCode: Ord('W'); Name: 'Wood $48';    Category: CAT_BLOCKS; AtlasCol: 10; AtlasRow: 4; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_WOOD;  ColorVal: $48),
-    { XBlock 'X' x 4 xblock colors }
-    (CharCode: Ord('X'); Name: 'XBlock $30';  Category: CAT_BLOCKS; AtlasCol: 11; AtlasRow: 4; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_XBLOCK; ColorVal: $30),
-    (CharCode: Ord('X'); Name: 'XBlock $68';  Category: CAT_BLOCKS; AtlasCol: 12; AtlasRow: 4; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_XBLOCK; ColorVal: $68),
-    (CharCode: Ord('X'); Name: 'XBlock $A0';  Category: CAT_BLOCKS; AtlasCol: 13; AtlasRow: 4; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_XBLOCK; ColorVal: $A0),
-    (CharCode: Ord('X'); Name: 'XBlock $B0';  Category: CAT_BLOCKS; AtlasCol: 14; AtlasRow: 4; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_XBLOCK; ColorVal: $B0),
+    { === ROW 6 cols 4+: Color-variant blocks === }
+    { Breakable Block — per-tile colored: codes #213..#216 }
+    (CharCode: 213; Name: 'Break Gray';    Category: CAT_BLOCKS; AtlasCol:  4; AtlasRow: 6; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_BRICK; ColorVal: $18),
+    (CharCode: 214; Name: 'Break Brown';   Category: CAT_BLOCKS; AtlasCol:  5; AtlasRow: 6; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_BRICK; ColorVal: $30),
+    (CharCode: 215; Name: 'Break Blue';    Category: CAT_BLOCKS; AtlasCol:  6; AtlasRow: 6; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_BRICK; ColorVal: $48),
+    (CharCode: 216; Name: 'Break Red';     Category: CAT_BLOCKS; AtlasCol:  7; AtlasRow: 6; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_BRICK; ColorVal: $B0),
+    { Wood — per-tile colored: codes #210..#212 }
+    (CharCode: 210; Name: 'Wood Gray';     Category: CAT_BLOCKS; AtlasCol:  8; AtlasRow: 6; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_WOOD;  ColorVal: $18),
+    (CharCode: 211; Name: 'Wood Brown';    Category: CAT_BLOCKS; AtlasCol:  9; AtlasRow: 6; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_WOOD;  ColorVal: $30),
+    (CharCode: 212; Name: 'Wood Blue';     Category: CAT_BLOCKS; AtlasCol: 10; AtlasRow: 6; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_WOOD;  ColorVal: $48),
+    { XBlock — per-tile colored: codes #206..#209 }
+    (CharCode: 206; Name: 'XBlock Brown';  Category: CAT_BLOCKS; AtlasCol: 11; AtlasRow: 6; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_XBLOCK; ColorVal: $30),
+    (CharCode: 207; Name: 'XBlock Orange'; Category: CAT_BLOCKS; AtlasCol: 12; AtlasRow: 6; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_XBLOCK; ColorVal: $68),
+    (CharCode: 208; Name: 'XBlock Green';  Category: CAT_BLOCKS; AtlasCol: 13; AtlasRow: 6; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_XBLOCK; ColorVal: $A0),
+    (CharCode: 209; Name: 'XBlock Red';    Category: CAT_BLOCKS; AtlasCol: 14; AtlasRow: 6; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_XBLOCK; ColorVal: $B0),
 
-    { === ROW 5: Rewards + Enemy markers === }
-    (CharCode: $E0; Name: 'Mushroom/Fire';     Category: CAT_REWARDS; AtlasCol:  0; AtlasRow: 5; IsMarker: True; MarkerLab: 'M'; MarkerCol: $CC0000FF; ColorType: CT_NONE; ColorVal: 0),
-    (CharCode: $E1; Name: '1-Up Mushroom';     Category: CAT_REWARDS; AtlasCol:  1; AtlasRow: 5; IsMarker: True; MarkerLab: '1'; MarkerCol: $CC00CC00; ColorType: CT_NONE; ColorVal: 0),
-    (CharCode: $E2; Name: 'Star';              Category: CAT_REWARDS; AtlasCol:  2; AtlasRow: 5; IsMarker: True; MarkerLab: 'S'; MarkerCol: $CC00FFFF; ColorType: CT_NONE; ColorVal: 0),
-    (CharCode: $E3; Name: 'Multi-Coin (x2)';  Category: CAT_REWARDS; AtlasCol:  3; AtlasRow: 5; IsMarker: True; MarkerLab: '$'; MarkerCol: $CC00CCFF; ColorType: CT_NONE; ColorVal: 0),
-    (CharCode: $ED; Name: 'Poison Mushroom';   Category: CAT_REWARDS; AtlasCol:  4; AtlasRow: 5; IsMarker: True; MarkerLab: 'X'; MarkerCol: $CC0000AA; ColorType: CT_NONE; ColorVal: 0),
+    { === ROW 7: Rewards + Enemy markers === }
+    (CharCode: $E0; Name: 'Mushroom/Fire';     Category: CAT_REWARDS; AtlasCol:  0; AtlasRow: 7; IsMarker: True; MarkerLab: 'M'; MarkerCol: $CC0000FF; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: $E1; Name: '1-Up Mushroom';     Category: CAT_REWARDS; AtlasCol:  1; AtlasRow: 7; IsMarker: True; MarkerLab: '1'; MarkerCol: $CC00CC00; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: $E2; Name: 'Star';              Category: CAT_REWARDS; AtlasCol:  2; AtlasRow: 7; IsMarker: True; MarkerLab: 'S'; MarkerCol: $CC00FFFF; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: $E3; Name: 'Multi-Coin (x2)';  Category: CAT_REWARDS; AtlasCol:  3; AtlasRow: 7; IsMarker: True; MarkerLab: '$'; MarkerCol: $CC00CCFF; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: $ED; Name: 'Poison Mushroom';   Category: CAT_REWARDS; AtlasCol:  4; AtlasRow: 7; IsMarker: True; MarkerLab: 'X'; MarkerCol: $CC0000AA; ColorType: CT_NONE; ColorVal: 0),
     { Pipe action markers }
-    (CharCode: $E0; Name: 'Pipe: Warp';        Category: CAT_REWARDS; AtlasCol:  5; AtlasRow: 5; IsMarker: True; MarkerLab: 'W'; MarkerCol: $CC00CC00; ColorType: CT_NONE; ColorVal: 0),
-    (CharCode: $E1; Name: 'Pipe: World Swap';  Category: CAT_REWARDS; AtlasCol:  6; AtlasRow: 5; IsMarker: True; MarkerLab: 'S'; MarkerCol: $CCFFCC00; ColorType: CT_NONE; ColorVal: 0),
-    (CharCode: $E7; Name: 'Pipe: Exit';        Category: CAT_REWARDS; AtlasCol:  7; AtlasRow: 5; IsMarker: True; MarkerLab: 'E'; MarkerCol: $CC0055FF; ColorType: CT_NONE; ColorVal: 0),
-    (CharCode: $EF; Name: 'Note Block Jump';   Category: CAT_REWARDS; AtlasCol:  8; AtlasRow: 5; IsMarker: True; MarkerLab: 'N'; MarkerCol: $CC8888FF; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: $E0; Name: 'Pipe: Warp';        Category: CAT_REWARDS; AtlasCol:  5; AtlasRow: 7; IsMarker: True; MarkerLab: 'W'; MarkerCol: $CC00CC00; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: $E1; Name: 'Pipe: World Swap';  Category: CAT_REWARDS; AtlasCol:  6; AtlasRow: 7; IsMarker: True; MarkerLab: 'S'; MarkerCol: $CCFFCC00; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: $E7; Name: 'Pipe: Exit';        Category: CAT_REWARDS; AtlasCol:  7; AtlasRow: 7; IsMarker: True; MarkerLab: 'E'; MarkerCol: $CC0055FF; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: $EF; Name: 'Note Block Jump';   Category: CAT_REWARDS; AtlasCol:  8; AtlasRow: 7; IsMarker: True; MarkerLab: 'N'; MarkerCol: $CC8888FF; ColorType: CT_NONE; ColorVal: 0),
     { Enemy markers (tile atlas only, actual sprites in enemy atlas) }
-    (CharCode: $80; Name: 'Goomba';           Category: CAT_ENEMIES; AtlasCol:  9; AtlasRow: 5; IsMarker: True; MarkerLab: 'G'; MarkerCol: $CC0000FF; ColorType: CT_NONE; ColorVal: 0),
-    (CharCode: $83; Name: 'Grey Goomba';      Category: CAT_ENEMIES; AtlasCol: 10; AtlasRow: 5; IsMarker: True; MarkerLab: 'G'; MarkerCol: $CC0000FF; ColorType: CT_NONE; ColorVal: 0),
-    (CharCode: $81; Name: 'Fish';             Category: CAT_ENEMIES; AtlasCol: 11; AtlasRow: 5; IsMarker: True; MarkerLab: 'F'; MarkerCol: $CCFFCC00; ColorType: CT_NONE; ColorVal: 0),
-    (CharCode: $82; Name: 'Fireball';         Category: CAT_ENEMIES; AtlasCol: 12; AtlasRow: 5; IsMarker: True; MarkerLab: '!'; MarkerCol: $CC0088FF; ColorType: CT_NONE; ColorVal: 0),
-    (CharCode: $84; Name: 'Piranha Plant';    Category: CAT_ENEMIES; AtlasCol: 13; AtlasRow: 5; IsMarker: True; MarkerLab: 'P'; MarkerCol: $CCFF00FF; ColorType: CT_NONE; ColorVal: 0),
-    (CharCode: $87; Name: 'Spiny';            Category: CAT_ENEMIES; AtlasCol: 14; AtlasRow: 5; IsMarker: True; MarkerLab: 'S'; MarkerCol: $CC0066FF; ColorType: CT_NONE; ColorVal: 0),
-    (CharCode: $88; Name: 'Green Koopa';      Category: CAT_ENEMIES; AtlasCol: 15; AtlasRow: 5; IsMarker: True; MarkerLab: 'K'; MarkerCol: $CC00CC00; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: $80; Name: 'Goomba';           Category: CAT_ENEMIES; AtlasCol:  9; AtlasRow: 7; IsMarker: True; MarkerLab: 'G'; MarkerCol: $CC0000FF; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: $83; Name: 'Grey Goomba';      Category: CAT_ENEMIES; AtlasCol: 10; AtlasRow: 7; IsMarker: True; MarkerLab: 'G'; MarkerCol: $CC0000FF; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: $81; Name: 'Fish';             Category: CAT_ENEMIES; AtlasCol: 11; AtlasRow: 7; IsMarker: True; MarkerLab: 'F'; MarkerCol: $CCFFCC00; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: $82; Name: 'Fireball';         Category: CAT_ENEMIES; AtlasCol: 12; AtlasRow: 7; IsMarker: True; MarkerLab: '!'; MarkerCol: $CC0088FF; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: $84; Name: 'Piranha Plant';    Category: CAT_ENEMIES; AtlasCol: 13; AtlasRow: 7; IsMarker: True; MarkerLab: 'P'; MarkerCol: $CCFF00FF; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: $87; Name: 'Spiny';            Category: CAT_ENEMIES; AtlasCol: 14; AtlasRow: 7; IsMarker: True; MarkerLab: 'S'; MarkerCol: $CC0066FF; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: $88; Name: 'Green Koopa';      Category: CAT_ENEMIES; AtlasCol: 15; AtlasRow: 7; IsMarker: True; MarkerLab: 'K'; MarkerCol: $CC00CC00; ColorType: CT_NONE; ColorVal: 0),
 
-    { === ROW 6: Enemy markers cont + Deco === }
-    (CharCode: $B0; Name: 'Block Lift';       Category: CAT_ENEMIES; AtlasCol:  0; AtlasRow: 6; IsMarker: True; MarkerLab: '='; MarkerCol: $CCFF8800; ColorType: CT_NONE; ColorVal: 0),
-    (CharCode: $B1; Name: 'Falling Platform'; Category: CAT_ENEMIES; AtlasCol:  1; AtlasRow: 6; IsMarker: True; MarkerLab: 'O'; MarkerCol: $CCFF8800; ColorType: CT_NONE; ColorVal: 0),
-    { Decoration: Design 1 (Overworld) }
-    (CharCode: Ord('#'); Name: '#  Waterfall/D1';   Category: CAT_DECO; AtlasCol:  2; AtlasRow: 6; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
-    (CharCode: Ord('%'); Name: '%  Waterfall/D1';   Category: CAT_DECO; AtlasCol:  3; AtlasRow: 6; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
-    (CharCode: 0;        Name: 'Fence (top)';      Category: CAT_DECO; AtlasCol:  4; AtlasRow: 6; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
-    (CharCode: 0;        Name: 'Fence (body)';     Category: CAT_DECO; AtlasCol:  5; AtlasRow: 6; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
-    { Design 2 (Forest) }
-    (CharCode: 0;        Name: '#  Tree/D2';       Category: CAT_DECO; AtlasCol:  6; AtlasRow: 6; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
-    (CharCode: 0;        Name: '%  Tree/D2';       Category: CAT_DECO; AtlasCol:  7; AtlasRow: 6; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
-    (CharCode: 0;        Name: 'Small Tree (top)'; Category: CAT_DECO; AtlasCol:  8; AtlasRow: 6; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
-    (CharCode: 0;        Name: 'Small Tree (body)';Category: CAT_DECO; AtlasCol:  9; AtlasRow: 6; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
-    { Design 1 misc }
-    (CharCode: 0;        Name: 'White Palm';       Category: CAT_DECO; AtlasCol: 10; AtlasRow: 6; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
-    { Design 3 (Castle) }
-    (CharCode: 0;        Name: '#  Window/D3';     Category: CAT_DECO; AtlasCol: 11; AtlasRow: 6; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
-    (CharCode: 0;        Name: '%  Window/D3';     Category: CAT_DECO; AtlasCol: 12; AtlasRow: 6; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
-    { Design 4 (Lava) }
-    (CharCode: 0;        Name: '#  Lava/D4';       Category: CAT_DECO; AtlasCol: 13; AtlasRow: 6; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
-    (CharCode: 0;        Name: '%  Lava/D4';       Category: CAT_DECO; AtlasCol: 14; AtlasRow: 6; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
-    { === ROW 7: Deco cont (Palms) === }
-    (CharCode: 0;        Name: 'Palm (center)';    Category: CAT_DECO; AtlasCol:  0; AtlasRow: 7; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
-    (CharCode: 0;        Name: 'Palm (left)';      Category: CAT_DECO; AtlasCol:  1; AtlasRow: 7; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
-    (CharCode: 0;        Name: 'Palm (top)';       Category: CAT_DECO; AtlasCol:  2; AtlasRow: 7; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
-    (CharCode: 0;        Name: 'Palm (right)';     Category: CAT_DECO; AtlasCol:  3; AtlasRow: 7; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0)
+    { === ROW 8: Enemy markers cont + Deco === }
+    (CharCode: $B0; Name: 'Block Lift';       Category: CAT_ENEMIES; AtlasCol:  0; AtlasRow: 8; IsMarker: True; MarkerLab: '='; MarkerCol: $CCFF8800; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: $B1; Name: 'Falling Platform'; Category: CAT_ENEMIES; AtlasCol:  1; AtlasRow: 8; IsMarker: True; MarkerLab: 'O'; MarkerCol: $CCFF8800; ColorType: CT_NONE; ColorVal: 0),
+    { === ROW 8 cols 2+, ROW 9: Decoration tiles === }
+    { Design 1: Waterfall (codes '#'=35 and '%'=37) }
+    (CharCode: Ord('#'); Name: 'Waterfall (#)';    Category: CAT_DECO; AtlasCol:  2; AtlasRow: 8; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: Ord('%'); Name: 'Waterfall (%)';    Category: CAT_DECO; AtlasCol:  3; AtlasRow: 8; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    { Design 2: Tree (codes #148, #149) }
+    (CharCode: 148;      Name: 'Tree trunk';       Category: CAT_DECO; AtlasCol:  4; AtlasRow: 8; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: 149;      Name: 'Tree leaves';      Category: CAT_DECO; AtlasCol:  5; AtlasRow: 8; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    { Design 3: Window (codes #150, #151) }
+    (CharCode: 150;      Name: 'Window (#)';       Category: CAT_DECO; AtlasCol:  6; AtlasRow: 8; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: 151;      Name: 'Window (%)';       Category: CAT_DECO; AtlasCol:  7; AtlasRow: 8; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    { Design 4: Lava (codes #152, #153) }
+    (CharCode: 152;      Name: 'Lava (#)';         Category: CAT_DECO; AtlasCol:  8; AtlasRow: 8; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: 153;      Name: 'Lava (%)';         Category: CAT_DECO; AtlasCol:  9; AtlasRow: 8; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    { Fence (D1, code #240) and Small Tree (D2, code #154) }
+    (CharCode: 240;      Name: 'Fence';            Category: CAT_DECO; AtlasCol: 10; AtlasRow: 8; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: 154;      Name: 'Small Tree';       Category: CAT_DECO; AtlasCol: 11; AtlasRow: 8; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    { Misc deco }
+    (CharCode: 247;      Name: 'Grass';            Category: CAT_DECO; AtlasCol: 12; AtlasRow: 8; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: 246;      Name: 'White Palm Trunk'; Category: CAT_DECO; AtlasCol: 13; AtlasRow: 8; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    { === ROW 9: Palms === }
+    (CharCode: 250;      Name: 'Palm (center)';    Category: CAT_DECO; AtlasCol:  0; AtlasRow: 9; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: 244;      Name: 'Palm (left)';      Category: CAT_DECO; AtlasCol:  1; AtlasRow: 9; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: 249;      Name: 'Palm (top)';       Category: CAT_DECO; AtlasCol:  2; AtlasRow: 9; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0),
+    (CharCode: 245;      Name: 'Palm (right)';     Category: CAT_DECO; AtlasCol:  3; AtlasRow: 9; IsMarker: False; MarkerLab: ' '; MarkerCol: 0; ColorType: CT_NONE; ColorVal: 0)
   );
 
 const
@@ -412,6 +529,11 @@ var
   PlayerSprBuf: array[0..PLAYER_SPR_W * PLAYER_SPR_H - 1] of UInt32;
   Initialized: Boolean;
   LevelLoaded: Boolean;
+
+  { Level metadata }
+  MetaName: AnsiString;
+  MetaCreator: AnsiString;
+  MetaDescription: AnsiString;
 
 procedure EdRenderInit;
 begin
@@ -481,10 +603,17 @@ begin
   { Save pristine copies of sprites that get modified in-place
     by InitPipes / BuildWorld during level loads. }
   SaveSpriteBackups;
+  InitColoredSprites;  { Populate pre-colored sprite arrays for per-tile colors }
 
   Initialized := True;
   LevelLoaded := False;
 end;
+
+{ Forward declarations for sub-level management (defined after EdLoadLevel) }
+procedure AllocSubLevel(Index: Integer); forward;
+procedure FreeSubLevel(Index: Integer); forward;
+procedure FreeAllSubLevels; forward;
+procedure LoadBufferToActive(Index: Integer); forward;
 
 procedure EdRenderShutdown;
 begin
@@ -504,6 +633,7 @@ begin
   SkyTexture := 0;
   EnemyAtlasTexture := 0;
   PlayerSprTexture := 0;
+  FreeAllSubLevels;
   Initialized := False;
 end;
 
@@ -536,8 +666,13 @@ begin
 end;
 
 procedure EdLoadLevel(WorldIdx: Integer; Sub: Char);
+var
+  StartSub: Integer;
 begin
   if not Initialized then Exit;
+
+  { Free any existing sub-level buffers }
+  FreeAllSubLevels;
 
   { Restore sprite data to pristine originals before recoloring.
     InitPipes and BuildWorld modify Pipe/Block/Wood/XBlock sprites
@@ -547,12 +682,39 @@ begin
     invisible to subsequent ReColor passes. }
   RestoreSpriteBackups;
 
-  { Load the world data into WorldMap + Options }
+  { Load the world data into WorldMap + Options.
+    After LoadWorld: WorldMap=A, SaveWorldMap=B,
+                     Options=A, SaveOptions=B }
   LoadWorld(WorldIdx);
 
-  { If requesting sub-level B, swap so B becomes active }
+  { Capture sub-level A (currently in WorldMap/Options) }
+  AllocSubLevel(0);
+  Move(WorldMap^, SubLevels[0]^.WorldSnap, SizeOf(WorldBuffer));
+  SubLevels[0]^.Opts := Options;
+  SubLevels[0]^.TabName := 'Level A';
+  SubLevels[0]^.SLMetaName := '';
+  SubLevels[0]^.SLMetaCreator := '';
+  SubLevels[0]^.SLMetaDescription := '';
+
+  { Capture sub-level B (currently in SaveWorldMap/SaveOptions) }
+  AllocSubLevel(1);
+  Move(SaveWorldMap^, SubLevels[1]^.WorldSnap, SizeOf(WorldBuffer));
+  SubLevels[1]^.Opts := SaveOptions;
+  SubLevels[1]^.TabName := 'Level B';
+  SubLevels[1]^.SLMetaName := '';
+  SubLevels[1]^.SLMetaCreator := '';
+  SubLevels[1]^.SLMetaDescription := '';
+
+  NumSubLevels := 2;
+
+  { Determine which sub-level to display initially }
   if Sub in ['B', 'b'] then
-    Swap;
+    StartSub := 1
+  else
+    StartSub := 0;
+
+  ActiveSubLevel := StartSub;
+  LoadBufferToActive(StartSub);
 
   { Initialize rendering state from Options }
   with Options do
@@ -581,11 +743,19 @@ begin
   { Set waterfall/lava palette entries (normally animated by BlinkPalette) }
   InitWaterfallPalette;
 
+  { Set fixed palette entries for design-independent deco sprites }
+  InitDecoSpritePalette;
+
   { Sync the full palette to VGA256's internal PaletteR/G/B arrays
     so GetPaletteEntry returns correct values }
   ReadPalette(Palette);
 
   LevelLoaded := True;
+
+  { Clear metadata (built-in levels have no user metadata) }
+  MetaName := '';
+  MetaCreator := '';
+  MetaDescription := '';
 
   { Ensure Bricks[0..2] are populated (BuildWall mode skips them) }
   EnsureBricks;
@@ -697,10 +867,18 @@ begin
   { Set LastXView again so DrawBackGr's PutClouds sees zero delta }
   LastXView[Pg] := ScrollX;
 
+  { Save WorldMap, run BuildWorld (converts A/B/C/D → #1..#26 for rendering),
+    render tiles, then restore original WorldMap so editor keeps raw characters. }
+  Move(WorldMap^, SaveWorldMap^, SizeOf(WorldBuffer));
+  BuildWorld;
+
   { Draw all visible tiles }
   for X := TileX1 - 1 to TileX2 do
     for Y := 0 to NV - 1 do
       Redraw(X, Y);
+
+  { Restore raw tile data (undo BuildWorld's destructive transforms) }
+  Move(SaveWorldMap^, WorldMap^, SizeOf(WorldBuffer));
 
   { Normalize the parallax region before DrawBackGr for SmoothFill skies }
   NormalizeParallaxRegion(ScrollX);
@@ -753,6 +931,11 @@ begin
   Result := LevelTexture;
 end;
 
+function EdIsLevelLoaded: Boolean;
+begin
+  Result := LevelLoaded;
+end;
+
 function EdGetLevelWidth: Integer;
 begin
   if LevelLoaded then
@@ -778,6 +961,18 @@ begin
     Result := WorldMap^[TileX, TileY]
   else
     Result := ' ';
+end;
+
+function EdSetTileAt(TileX, TileY: Integer; NewChar: Char): Char;
+begin
+  if LevelLoaded and (TileX >= 0) and (TileX < Options.XSize) and
+     (TileY >= 0) and (TileY < NV) then
+  begin
+    Result := WorldMap^[TileX, TileY];
+    WorldMap^[TileX, TileY] := NewChar;
+  end
+  else
+    Result := #0;
 end;
 
 function EdGetTileW: Integer;
@@ -811,6 +1006,18 @@ begin
     Result := 0;
 end;
 
+procedure EdSetPlayerStartX(TileX: Integer);
+begin
+  if LevelLoaded then
+    Options.InitX := TileX * W;
+end;
+
+procedure EdSetPlayerStartY(TileY: Integer);
+begin
+  if LevelLoaded then
+    Options.InitY := TileY * H;
+end;
+
 function EdGetLevelXSize: Integer;
 begin
   if LevelLoaded then
@@ -837,6 +1044,223 @@ end;
 function EdGetHorizon: Integer;
 begin
   if LevelLoaded then Result := Options.Horizon else Result := 0;
+end;
+
+{ --- Level metadata getters/setters --- }
+
+function EdGetLevelName: AnsiString;
+begin
+  Result := MetaName;
+end;
+
+procedure EdSetLevelName(const S: AnsiString);
+begin
+  MetaName := S;
+end;
+
+function EdGetLevelCreator: AnsiString;
+begin
+  Result := MetaCreator;
+end;
+
+procedure EdSetLevelCreator(const S: AnsiString);
+begin
+  MetaCreator := S;
+end;
+
+function EdGetLevelDescription: AnsiString;
+begin
+  Result := MetaDescription;
+end;
+
+procedure EdSetLevelDescription(const S: AnsiString);
+begin
+  MetaDescription := S;
+end;
+
+{ --- Sub-Level Management --- }
+
+procedure AllocSubLevel(Index: Integer);
+begin
+  if SubLevels[Index] = nil then
+    New(SubLevels[Index]);
+end;
+
+procedure FreeSubLevel(Index: Integer);
+begin
+  if SubLevels[Index] <> nil then
+  begin
+    Dispose(SubLevels[Index]);
+    SubLevels[Index] := nil;
+  end;
+end;
+
+procedure FreeAllSubLevels;
+var
+  i: Integer;
+begin
+  for i := 0 to MAX_SUB_LEVELS - 1 do
+    FreeSubLevel(i);
+  NumSubLevels := 0;
+  ActiveSubLevel := 0;
+end;
+
+{ Save the currently active WorldMap/Options/metadata into the active sub-level buffer }
+procedure EdSaveActiveToBuffer;
+begin
+  if (ActiveSubLevel < 0) or (ActiveSubLevel >= NumSubLevels) then Exit;
+  if SubLevels[ActiveSubLevel] = nil then Exit;
+  Move(WorldMap^, SubLevels[ActiveSubLevel]^.WorldSnap, SizeOf(WorldBuffer));
+  SubLevels[ActiveSubLevel]^.Opts := Options;
+  SubLevels[ActiveSubLevel]^.SLMetaName := MetaName;
+  SubLevels[ActiveSubLevel]^.SLMetaCreator := MetaCreator;
+  SubLevels[ActiveSubLevel]^.SLMetaDescription := MetaDescription;
+end;
+
+{ Restore WorldMap/Options/metadata from a sub-level buffer }
+procedure LoadBufferToActive(Index: Integer);
+begin
+  if (Index < 0) or (Index >= NumSubLevels) then Exit;
+  if SubLevels[Index] = nil then Exit;
+  Move(SubLevels[Index]^.WorldSnap, WorldMap^, SizeOf(WorldBuffer));
+  Options := SubLevels[Index]^.Opts;
+  MetaName := SubLevels[Index]^.SLMetaName;
+  MetaCreator := SubLevels[Index]^.SLMetaCreator;
+  MetaDescription := SubLevels[Index]^.SLMetaDescription;
+end;
+
+{ Re-initialize all rendering state from current Options (same as EdLoadLevel tail) }
+procedure ReinitRenderState;
+begin
+  RestoreSpriteBackups;
+  with Options do
+  begin
+    InitSky(SkyType);
+    InitWalls(WallType1, WallType2, WallType3);
+    InitPipes(PipeColor);
+    InitBackGr(BackGrType, Clouds);
+  end;
+  BuildWorld;
+  NewPalette(P256^);
+  SetSkyPalette;
+  InitGrass;
+  DrawPalBackGr;
+  InitWaterfallPalette;
+  InitDecoSpritePalette;
+  ReadPalette(Palette);
+  EnsureBricks;
+  EdBuildTileAtlas;
+  EdBuildEnemyAtlas;
+  EdBuildPlayerSprite;
+  EdBuildSkyPreview;
+end;
+
+function EdGetNumSubLevels: Integer;
+begin
+  Result := NumSubLevels;
+end;
+
+function EdGetActiveSubLevel: Integer;
+begin
+  Result := ActiveSubLevel;
+end;
+
+procedure EdSwitchSubLevel(Index: Integer);
+begin
+  if (Index < 0) or (Index >= NumSubLevels) then Exit;
+  if Index = ActiveSubLevel then Exit;
+
+  { Save current edits to the active buffer }
+  EdSaveActiveToBuffer;
+
+  { Switch to the target sub-level }
+  ActiveSubLevel := Index;
+  LoadBufferToActive(Index);
+  ReinitRenderState;
+end;
+
+function EdAddSubLevel: Integer;
+var
+  NewIdx: Integer;
+begin
+  Result := -1;
+  if NumSubLevels >= MAX_SUB_LEVELS then Exit;
+
+  { Save current edits first }
+  EdSaveActiveToBuffer;
+
+  NewIdx := NumSubLevels;
+  AllocSubLevel(NewIdx);
+
+  { Initialize with empty level data }
+  FillChar(SubLevels[NewIdx]^.WorldSnap, SizeOf(WorldBuffer), ' ');
+  FillChar(SubLevels[NewIdx]^.Opts, SizeOf(WorldOptions), 0);
+  with SubLevels[NewIdx]^.Opts do
+  begin
+    Design := 1;
+    SkyType := 0;
+    Horizon := 6;
+    BackGrType := 1;
+    Clouds := 3;
+    C2r := 20; C2g := 30; C2b := 63;
+    C3r := 40; C3g := 50; C3b := 60;
+    BuildWall := True;
+    XSize := 236;
+    InitX := 2 * W;
+    InitY := 10 * H;
+  end;
+  SubLevels[NewIdx]^.TabName := 'Sub-level ' + Chr(Ord('A') + NewIdx);
+  SubLevels[NewIdx]^.SLMetaName := '';
+  SubLevels[NewIdx]^.SLMetaCreator := '';
+  SubLevels[NewIdx]^.SLMetaDescription := '';
+
+  Inc(NumSubLevels);
+
+  { Switch to the new sub-level }
+  ActiveSubLevel := NewIdx;
+  LoadBufferToActive(NewIdx);
+  ReinitRenderState;
+
+  Result := NewIdx;
+end;
+
+procedure EdRemoveSubLevel(Index: Integer);
+var
+  i: Integer;
+begin
+  if NumSubLevels <= 1 then Exit;
+  if (Index < 0) or (Index >= NumSubLevels) then Exit;
+
+  { Free the buffer being removed }
+  FreeSubLevel(Index);
+
+  { Shift remaining entries down }
+  for i := Index to NumSubLevels - 2 do
+    SubLevels[i] := SubLevels[i + 1];
+  SubLevels[NumSubLevels - 1] := nil;
+  Dec(NumSubLevels);
+
+  { Adjust active index }
+  if ActiveSubLevel >= NumSubLevels then
+    ActiveSubLevel := NumSubLevels - 1;
+
+  { Load the now-active sub-level }
+  LoadBufferToActive(ActiveSubLevel);
+  ReinitRenderState;
+end;
+
+function EdGetSubLevelName(Index: Integer): AnsiString;
+begin
+  if (Index >= 0) and (Index < NumSubLevels) and (SubLevels[Index] <> nil) then
+    Result := SubLevels[Index]^.TabName
+  else
+    Result := '';
+end;
+
+procedure EdSetSubLevelName(Index: Integer; const S: AnsiString);
+begin
+  if (Index >= 0) and (Index < NumSubLevels) and (SubLevels[Index] <> nil) then
+    SubLevels[Index]^.TabName := S;
 end;
 
 { Helper: render a sprite byte array into the atlas buffer at (Col, Row) }
@@ -896,27 +1320,7 @@ begin
     end;
 end;
 
-{ Decoration sprite lookup: maps sequential DecoIdx to GetSpritePtr keys }
-const
-  DECO_LOOKUP: array[0..16] of AnsiChar = (
-    'a',  { Fall000 — waterfall '#' design 1 }
-    'b',  { Fall001 — waterfall '%' design 1 }
-    'F',  { Fence000 }
-    'f',  { Fence001 }
-    'T',  { Tree000 }
-    't',  { Tree001 }
-    'S',  { SmTree000 }
-    's',  { SmTree001 }
-    'P',  { WPalm000 }
-    'w',  { Window000 }
-    'v',  { Window001 }
-    'L',  { Lava000 }
-    'l',  { Lava001 }
-    'p',  { Palm0000 — palm center }
-    'q',  { Palm1000 — palm left }
-    'r',  { Palm2000 — palm top }
-    'u'   { Palm3000 — palm right }
-  );
+{ (DECO_LOOKUP removed — deco entries now use GetSpritePtr(Chr(CharCode)) directly) }
 
 { Set waterfall/lava palette entries 7-11 for a given SkyType.
   Same formula as InitWaterfallPalette / BlinkPalette but writes
@@ -979,28 +1383,16 @@ end;
 
 procedure EdBuildTileAtlas;
 var
-  i, DecoIdx: Integer;
+  i: Integer;
   Entry: TTileAtlasEntry;
   SprPtr: Pointer;
-  TmpBuf: array[0..W * H - 1] of Byte;
-  FirstDecoIdx: Integer;
   BrickPat: Integer;
-  BrickSrc: Pointer;
   PalSave: array[0..47] of Byte;  { up to 16 entries * 3 bytes }
 begin
   if not Initialized then Exit;
 
   { Clear atlas to transparent }
   FillChar(AtlasBuf, SizeOf(AtlasBuf), 0);
-
-  { Find first deco entry index (search once) }
-  FirstDecoIdx := -1;
-  for i := 0 to TILE_ATLAS_COUNT - 1 do
-    if TileAtlas[i].Category = CAT_DECO then
-    begin
-      FirstDecoIdx := i;
-      Break;
-    end;
 
   for i := 0 to TILE_ATLAS_COUNT - 1 do
   begin
@@ -1018,138 +1410,156 @@ begin
     case Entry.Category of
       CAT_GROUND:
         begin
-          { First 3 entries: current level's ground from FigList }
-          if i <= 2 then
-            case i of
-              0: SprPtr := @FigList[1, 5];   { body }
-              1: SprPtr := @FigList[1, 2];   { top }
-              2: SprPtr := @FigList[1, 1];   { corner }
-            end
-          else
+          { Ground wall variants: each CharCode maps to a unique style+variant
+            in the WallVariants[style 0..4, variant 0..8] array.
+            Style: 0=Green(#91-99), 1=Sand(#100-108), 2=Brown(#109-117),
+                   3=Grass(#118-126), 4=Desert(#139-147) }
+          if ColorSpritesReady then
           begin
-            { Wall type variants from original sprite data }
-            case i of
-               3: SprPtr := GetWallSpritePtr(0, 4);   { Green body }
-               4: SprPtr := GetWallSpritePtr(0, 1);   { Green top }
-               5: SprPtr := GetWallSpritePtr(0, 0);   { Green corner }
-               6: SprPtr := GetWallSpritePtr(1, 4);   { Sand body }
-               7: SprPtr := GetWallSpritePtr(1, 1);   { Sand top }
-               8: SprPtr := GetWallSpritePtr(1, 0);   { Sand corner }
-               9: SprPtr := GetWallSpritePtr(3, 4);   { Brown body }
-              10: SprPtr := GetWallSpritePtr(3, 1);   { Brown top }
-              11: SprPtr := GetWallSpritePtr(3, 0);   { Brown corner }
-              12: SprPtr := GetWallSpritePtr(4, 4);   { Grass body }
-              13: SprPtr := GetWallSpritePtr(4, 1);   { Grass top }
-              14: SprPtr := GetWallSpritePtr(4, 0);   { Grass corner }
-              15: SprPtr := GetWallSpritePtr(5, 4);   { Desert body }
-              16: SprPtr := GetWallSpritePtr(5, 1);   { Desert top }
-              17: SprPtr := GetWallSpritePtr(5, 0);   { Desert corner }
+            if (Entry.CharCode >= CWALL_GREEN) and (Entry.CharCode <= CWALL_GREEN + 8) then
+              SprPtr := @WallVariants[0, Entry.CharCode - CWALL_GREEN]
+            else if (Entry.CharCode >= CWALL_SAND) and (Entry.CharCode <= CWALL_SAND + 8) then
+              SprPtr := @WallVariants[1, Entry.CharCode - CWALL_SAND]
+            else if (Entry.CharCode >= CWALL_BROWN) and (Entry.CharCode <= CWALL_BROWN + 8) then
+              SprPtr := @WallVariants[2, Entry.CharCode - CWALL_BROWN]
+            else if (Entry.CharCode >= CWALL_GRASS) and (Entry.CharCode <= CWALL_GRASS + 8) then
+              SprPtr := @WallVariants[3, Entry.CharCode - CWALL_GRASS]
+            else if (Entry.CharCode >= CWALL_DESERT) and (Entry.CharCode <= CWALL_DESERT + 8) then
+              SprPtr := @WallVariants[4, Entry.CharCode - CWALL_DESERT];
+
+            if SprPtr <> nil then
+            begin
+              RenderSpriteToAtlas(SprPtr, Entry.AtlasCol, Entry.AtlasRow);
+              Continue;
             end;
           end;
         end;
 
       CAT_BRICKS:
         begin
-          { Brick entries have ColorType=CT_BRICK.
-            Determine which base pattern from the name: 'Brick0..', 'Brick1..', 'Brick2..' }
-          if Entry.ColorType = CT_BRICK then
+          { Brick entries: use pre-colored ColorBricks[colorIdx, pattern].
+            ColorIdx = CharCode - CBRICK_BASE (0..3).
+            Pattern extracted from name: 'Brick0...'=0, 'Brick1...'=1, 'Brick2...'=2. }
+          if (Entry.ColorType = CT_BRICK) and ColorSpritesReady then
           begin
-            { Extract brick pattern index from name: 'Brick0...'=0, 'Brick1...'=1, 'Brick2...'=2 }
             if (Entry.Name <> nil) and (Length(Entry.Name) >= 6) then
               BrickPat := Ord(Entry.Name[5]) - Ord('0')
             else
               BrickPat := 0;
             if (BrickPat < 0) or (BrickPat > 2) then BrickPat := 0;
-            BrickSrc := GetBrickSpritePtr(BrickPat);
-            if BrickSrc <> nil then
-            begin
-              ReColor(BrickSrc, @TmpBuf, Entry.ColorVal);
-              RenderSpriteToAtlas(@TmpBuf, Entry.AtlasCol, Entry.AtlasRow);
-            end;
+            RenderSpriteToAtlas(
+              @ColorBricks[Entry.CharCode - CBRICK_BASE, BrickPat],
+              Entry.AtlasCol, Entry.AtlasRow);
             Continue;
           end;
         end;
 
       CAT_PIPES:
         begin
-          { Pipe entries have ColorType=CT_PIPE.
-            Get the raw pipe sprite (already recolored with current level color)
-            and re-apply ReColor with the target color. }
+          { Pipe entries: use pre-colored ColorPipes[colorIdx, shapeIdx].
+            ColorIdx = (CharCode - CPIPE_BASE) div 4,
+            ShapeIdx = (CharCode - CPIPE_BASE) mod 4. }
           if Entry.ColorType = CT_PIPE then
           begin
-            SprPtr := GetSpritePtr(Chr(Entry.CharCode));
-            if SprPtr <> nil then
-            begin
-              ReColor(SprPtr, @TmpBuf, Entry.ColorVal);
-              RenderSpriteToAtlas(@TmpBuf, Entry.AtlasCol, Entry.AtlasRow);
-            end;
+            if ColorSpritesReady then
+              RenderSpriteToAtlas(
+                @ColorPipes[(Entry.CharCode - CPIPE_BASE) div 4,
+                             (Entry.CharCode - CPIPE_BASE) mod 4],
+                Entry.AtlasCol, Entry.AtlasRow);
             Continue;
           end;
         end;
 
       CAT_BLOCKS:
         begin
-          { Color-variant blocks: J (CT_BRICK), W (CT_WOOD), X (CT_XBLOCK) }
-          if Entry.ColorType <> CT_NONE then
+          { Color-variant blocks: use pre-colored arrays }
+          if (Entry.ColorType <> CT_NONE) and ColorSpritesReady then
           begin
-            SprPtr := GetSpritePtr(Chr(Entry.CharCode));
-            if SprPtr <> nil then
-            begin
-              ReColor(SprPtr, @TmpBuf, Entry.ColorVal);
-              RenderSpriteToAtlas(@TmpBuf, Entry.AtlasCol, Entry.AtlasRow);
+            case Entry.ColorType of
+              CT_BRICK:
+                begin
+                  { Breakable block: CharCode #213..#216 → ColorBreak[0..3] }
+                  SprPtr := @ColorBreak[Entry.CharCode - CBREAK_BASE];
+                end;
+              CT_WOOD:
+                begin
+                  { Wood block: CharCode #210..#212 → ColorWood[0..2] }
+                  SprPtr := @ColorWood[Entry.CharCode - CWOOD_BASE];
+                end;
+              CT_XBLOCK:
+                begin
+                  { XBlock: CharCode #206..#209 → ColorXBlocks[0..3] }
+                  SprPtr := @ColorXBlocks[Entry.CharCode - CXBLOCK_BASE];
+                end;
+            else
+              SprPtr := nil;
             end;
+            if SprPtr <> nil then
+              RenderSpriteToAtlas(SprPtr, Entry.AtlasCol, Entry.AtlasRow);
             Continue;
           end;
           { Static blocks (?, @, $, I, K): no recoloring }
           SprPtr := GetSpritePtr(Chr(Entry.CharCode));
         end;
 
-      CAT_ITEMS, CAT_PLATFORM:
-        SprPtr := GetSpritePtr(Chr(Entry.CharCode));
+      CAT_ITEMS:
+        begin
+          SprPtr := GetSpritePtr(Chr(Entry.CharCode));
+          { Flag (pole) shares CharCode 254 with Flag (top).
+            Detect by name and use Exit001 (pole) sprite instead. }
+          if (Entry.CharCode = 254) and (Entry.Name <> nil) and
+             (Pos('pole', Entry.Name) > 0) then
+            SprPtr := GetSpritePtr(#255);  { Exit001 = pole }
+        end;
+
+      CAT_PLATFORM:
+        begin
+          { Jump-thru tiles #14-#16 render as wall top-row in the game
+            (TL/Top/TR of current wall style). Use WallVariants if ready. }
+          if (Entry.CharCode >= 14) and (Entry.CharCode <= 16) and ColorSpritesReady then
+            SprPtr := @WallVariants[0, Entry.CharCode - 14]  { Green TL/Top/TR }
+          else
+            SprPtr := GetSpritePtr(Chr(Entry.CharCode));
+        end;
 
       CAT_DECO:
         begin
-          if FirstDecoIdx >= 0 then
-          begin
-            DecoIdx := i - FirstDecoIdx;
-            if (DecoIdx >= 0) and (DecoIdx <= High(DECO_LOOKUP)) then
-            begin
-              SprPtr := GetSpritePtr(DECO_LOOKUP[DecoIdx]);
+          { Each deco variant has a unique CharCode.
+            Some need temporary palette swaps for correct colors. }
+          SprPtr := GetSpritePtr(Chr(Entry.CharCode));
 
-              { Waterfall/lava/window sprites use palette entries that
-                change per level.  Temporarily swap to the canonical
-                palette for each design so the atlas is level-independent. }
-              case DecoIdx of
-                0, 1:   { Waterfall — use SkyType 2 (Stars/blue water) }
-                  begin
-                    SavePalRange(7, 5, PalSave);
-                    SetWaterfallPalForSky(2);
-                    if SprPtr <> nil then
-                      RenderSpriteToAtlas(SprPtr, Entry.AtlasCol, Entry.AtlasRow);
-                    RestorePalRange(7, 5, PalSave);
-                    SprPtr := nil;  { already rendered }
-                  end;
-                9, 10:  { Window — use SkyType 8 (Castle) }
-                  begin
-                    SavePalRange($F0, 16, PalSave);  { $F0..$FF }
-                    SetWindowPalette;
-                    if SprPtr <> nil then
-                      RenderSpriteToAtlas(SprPtr, Entry.AtlasCol, Entry.AtlasRow);
-                    RestorePalRange($F0, 16, PalSave);
-                    SprPtr := nil;
-                  end;
-                11, 12: { Lava — use SkyType 6 (Lava/orange) }
-                  begin
-                    SavePalRange(7, 5, PalSave);
-                    SetWaterfallPalForSky(6);
-                    if SprPtr <> nil then
-                      RenderSpriteToAtlas(SprPtr, Entry.AtlasCol, Entry.AtlasRow);
-                    RestorePalRange(7, 5, PalSave);
-                    SprPtr := nil;
-                  end;
-              end;
-            end;
+          if (Entry.CharCode = Ord('#')) or (Entry.CharCode = Ord('%')) then
+          begin
+            { Waterfall — set blue water palette }
+            SavePalRange(7, 5, PalSave);
+            SetWaterfallPalForSky(2);
+            if SprPtr <> nil then
+              RenderSpriteToAtlas(SprPtr, Entry.AtlasCol, Entry.AtlasRow);
+            RestorePalRange(7, 5, PalSave);
+            SprPtr := nil;
+          end
+          else if (Entry.CharCode = 150) or (Entry.CharCode = 151) then
+          begin
+            { Window — set castle palette }
+            SavePalRange($F0, 16, PalSave);
+            SetWindowPalette;
+            if SprPtr <> nil then
+              RenderSpriteToAtlas(SprPtr, Entry.AtlasCol, Entry.AtlasRow);
+            RestorePalRange($F0, 16, PalSave);
+            SprPtr := nil;
+          end
+          else if (Entry.CharCode = 152) or (Entry.CharCode = 153) then
+          begin
+            { Lava — set orange/red lava palette }
+            SavePalRange(7, 5, PalSave);
+            SetWaterfallPalForSky(6);
+            if SprPtr <> nil then
+              RenderSpriteToAtlas(SprPtr, Entry.AtlasCol, Entry.AtlasRow);
+            RestorePalRange(7, 5, PalSave);
+            SprPtr := nil;
           end;
+          { All other deco tiles (tree, fence, small tree, grass, palms)
+            use default palette — SprPtr stays set for render below. }
         end;
     end;
 
@@ -1299,6 +1709,34 @@ begin
       Result := i;
       Exit;
     end;
+end;
+
+function EdFindTileAtlasIndex(CharCode: Byte): Integer;
+var
+  i: Integer;
+begin
+  Result := -1;
+  for i := 0 to TILE_ATLAS_COUNT - 1 do
+    if TileAtlas[i].CharCode = CharCode then
+    begin
+      Result := i;
+      Exit;
+    end;
+end;
+
+function EdNeedsOverlay(CharCode: Byte): Boolean;
+begin
+  { Palette-dependent deco tiles that can't render correctly via Redraw
+    because they use palette indices shared with sky/parallax/waterfall.
+    These must be drawn as overlay sprites from the tile atlas (which was
+    rendered with the correct palette). }
+  case CharCode of
+    150, 151,   { Window — uses $F0/$FF, shared with sky }
+    152, 153:   { Lava — uses 7-11, shared with waterfall }
+      Result := True;
+  else
+    Result := False;
+  end;
 end;
 
 { --- Player Sprite --- }
@@ -1560,6 +1998,950 @@ begin
   end;
 end;
 
+{ --- Save/Load (.mled binary format) --- }
+
+const
+  MLED_MAGIC: array[0..3] of Char = ('M','L','E','D');
+  MLED_VERSION: Byte = 1;
+
+function EdSaveLevel(const FileName: AnsiString): Boolean;
+var
+  F: File;
+  x, y: Integer;
+  Ch: Char;
+begin
+  Result := False;
+  if not LevelLoaded then Exit;
+
+  AssignFile(F, FileName);
+  {$I-}
+  Rewrite(F, 1);
+  {$I+}
+  if IOResult <> 0 then Exit;
+
+  { Write header: magic + version }
+  BlockWrite(F, MLED_MAGIC, 4);
+  BlockWrite(F, MLED_VERSION, 1);
+
+  { Write Options record }
+  BlockWrite(F, Options, SizeOf(WorldOptions));
+
+  { Write tile data: XSize columns × NV rows, column-major }
+  for x := 0 to Options.XSize - 1 do
+    for y := 0 to NV - 1 do
+    begin
+      Ch := WorldMap^[x, y];
+      BlockWrite(F, Ch, 1);
+    end;
+
+  { Write hidden row (row NV = 13, used for camera locks and pipe warps) }
+  for x := 0 to Options.XSize - 1 do
+  begin
+    Ch := WorldMap^[x, NV];
+    BlockWrite(F, Ch, 1);
+  end;
+
+  CloseFile(F);
+  Result := True;
+end;
+
+function EdLoadLevelFromFile(const FileName: AnsiString): Boolean;
+var
+  F: File;
+  Magic: array[0..3] of Char;
+  Ver: Byte;
+  x, y: Integer;
+  Ch: Char;
+  FileOpts: WorldOptions;
+begin
+  Result := False;
+  if not Initialized then Exit;
+
+  AssignFile(F, FileName);
+  {$I-}
+  Reset(F, 1);
+  {$I+}
+  if IOResult <> 0 then Exit;
+
+  { Read and validate header }
+  BlockRead(F, Magic, 4);
+  if (Magic[0] <> 'M') or (Magic[1] <> 'L') or (Magic[2] <> 'E') or (Magic[3] <> 'D') then
+  begin
+    CloseFile(F);
+    Exit;
+  end;
+  BlockRead(F, Ver, 1);
+  if Ver <> 1 then
+  begin
+    CloseFile(F);
+    Exit;
+  end;
+
+  { Read Options }
+  BlockRead(F, FileOpts, SizeOf(WorldOptions));
+
+  { Validate XSize }
+  if (FileOpts.XSize < 1) or (FileOpts.XSize > MaxWorldSize) then
+  begin
+    CloseFile(F);
+    Exit;
+  end;
+
+  { Free existing sub-level buffers }
+  FreeAllSubLevels;
+
+  { Restore sprites before re-initializing }
+  RestoreSpriteBackups;
+
+  { Apply Options }
+  Options := FileOpts;
+
+  { Clear WorldMap }
+  FillChar(WorldMap^, SizeOf(WorldBuffer), ' ');
+
+  { Read tile data: XSize columns × NV rows }
+  for x := 0 to Options.XSize - 1 do
+    for y := 0 to NV - 1 do
+    begin
+      BlockRead(F, Ch, 1);
+      WorldMap^[x, y] := Ch;
+    end;
+
+  { Read hidden row }
+  for x := 0 to Options.XSize - 1 do
+  begin
+    BlockRead(F, Ch, 1);
+    WorldMap^[x, NV] := Ch;
+  end;
+
+  CloseFile(F);
+
+  { Clear metadata (binary format has no metadata) }
+  MetaName := '';
+  MetaCreator := '';
+  MetaDescription := '';
+
+  { Initialize sub-level system with single sub-level }
+  AllocSubLevel(0);
+  Move(WorldMap^, SubLevels[0]^.WorldSnap, SizeOf(WorldBuffer));
+  SubLevels[0]^.Opts := Options;
+  SubLevels[0]^.TabName := 'Level A';
+  SubLevels[0]^.SLMetaName := '';
+  SubLevels[0]^.SLMetaCreator := '';
+  SubLevels[0]^.SLMetaDescription := '';
+  NumSubLevels := 1;
+  ActiveSubLevel := 0;
+
+  { Initialize rendering state from Options (same as EdLoadLevel) }
+  with Options do
+  begin
+    InitSky(SkyType);
+    InitWalls(WallType1, WallType2, WallType3);
+    InitPipes(PipeColor);
+    InitBackGr(BackGrType, Clouds);
+  end;
+
+  BuildWorld;
+  NewPalette(P256^);
+  SetSkyPalette;
+  InitGrass;
+  DrawPalBackGr;
+  InitWaterfallPalette;
+  InitDecoSpritePalette;
+  ReadPalette(Palette);
+
+  LevelLoaded := True;
+
+  EnsureBricks;
+  EdBuildTileAtlas;
+  EdBuildEnemyAtlas;
+  EdBuildPlayerSprite;
+  EdBuildSkyPreview;
+
+  Result := True;
+end;
+
+{ ===== JSON Save/Load ===== }
+
+{ Helper: write a string to a text file }
+procedure JSONWrite(var F: TextFile; const S: AnsiString);
+begin
+  Write(F, S);
+end;
+
+{ Helper: write a line to a text file }
+procedure JSONWriteLn(var F: TextFile; const S: AnsiString);
+begin
+  WriteLn(F, S);
+end;
+
+{ Helper: escape a string for JSON output (escape " and \) }
+function JSONEscapeStr(const S: AnsiString): AnsiString;
+var
+  i: Integer;
+begin
+  Result := '';
+  for i := 1 to Length(S) do
+  begin
+    if S[i] = '\' then
+      Result := Result + '\\'
+    else if S[i] = '"' then
+      Result := Result + '\"'
+    else
+      Result := Result + S[i];
+  end;
+end;
+
+{ Helper: encode a tile row into a JSON-safe string.
+  Printable ASCII (32..126) -> as-is.
+  Non-printable -> $XX hex escape. }
+function EncodeTileRow(TileY, XSize: Integer): AnsiString;
+var
+  x: Integer;
+  Ch: Char;
+  b: Byte;
+begin
+  Result := '';
+  for x := 0 to XSize - 1 do
+  begin
+    Ch := WorldMap^[x, TileY];
+    b := Ord(Ch);
+    if (b >= 32) and (b <= 126) and (Ch <> '$') then
+    begin
+      { Escape backslash and double-quote for JSON string safety }
+      if Ch = '\' then
+        Result := Result + '\\'
+      else if Ch = '"' then
+        Result := Result + '\"'
+      else
+        Result := Result + Ch;
+    end
+    else
+      Result := Result + '$' + IntToHex(b, 2);
+  end;
+end;
+
+{ Write one sub-level's options and tile data as a JSON object.
+  Reads tile data from the current WorldMap^.
+  Indent is the base indentation string (e.g. '    ' for nested in array). }
+procedure WriteSubLevelJSON(var F: TextFile; const Indent: AnsiString;
+  const Opts: WorldOptions; const TabName, SLName, SLCreator, SLDesc: AnsiString);
+var
+  y, GameY, BW: Integer;
+begin
+  JSONWriteLn(F, Indent + '{');
+  JSONWriteLn(F, Indent + '  "name": "' + JSONEscapeStr(TabName) + '",');
+  JSONWriteLn(F, Indent + '  "levelName": "' + JSONEscapeStr(SLName) + '",');
+  JSONWriteLn(F, Indent + '  "creator": "' + JSONEscapeStr(SLCreator) + '",');
+  JSONWriteLn(F, Indent + '  "description": "' + JSONEscapeStr(SLDesc) + '",');
+
+  with Opts do
+  begin
+    JSONWriteLn(F, Indent + '  "design": ' + IntToStr(Design) + ',');
+    JSONWriteLn(F, Indent + '  "skyType": ' + IntToStr(SkyType) + ',');
+    JSONWriteLn(F, Indent + '  "wallType1": ' + IntToStr(WallType1) + ',');
+    JSONWriteLn(F, Indent + '  "wallType2": ' + IntToStr(WallType2) + ',');
+    JSONWriteLn(F, Indent + '  "wallType3": ' + IntToStr(WallType3) + ',');
+    JSONWriteLn(F, Indent + '  "pipeColor": ' + IntToStr(PipeColor) + ',');
+    JSONWriteLn(F, Indent + '  "groundColor1": ' + IntToStr(GroundColor1) + ',');
+    JSONWriteLn(F, Indent + '  "groundColor2": ' + IntToStr(GroundColor2) + ',');
+    JSONWriteLn(F, Indent + '  "horizon": ' + IntToStr(Horizon) + ',');
+    JSONWriteLn(F, Indent + '  "backGrType": ' + IntToStr(BackGrType) + ',');
+    JSONWriteLn(F, Indent + '  "backGrColor1": ' + IntToStr(BackGrColor1) + ',');
+    JSONWriteLn(F, Indent + '  "backGrColor2": ' + IntToStr(BackGrColor2) + ',');
+    JSONWriteLn(F, Indent + '  "stars": ' + IntToStr(Stars) + ',');
+    JSONWriteLn(F, Indent + '  "clouds": ' + IntToStr(Clouds) + ',');
+    JSONWriteLn(F, Indent + '  "c2r": ' + IntToStr(C2r) + ',');
+    JSONWriteLn(F, Indent + '  "c2g": ' + IntToStr(C2g) + ',');
+    JSONWriteLn(F, Indent + '  "c2b": ' + IntToStr(C2b) + ',');
+    JSONWriteLn(F, Indent + '  "c3r": ' + IntToStr(C3r) + ',');
+    JSONWriteLn(F, Indent + '  "c3g": ' + IntToStr(C3g) + ',');
+    JSONWriteLn(F, Indent + '  "c3b": ' + IntToStr(C3b) + ',');
+    JSONWriteLn(F, Indent + '  "brickColor": ' + IntToStr(BrickColor) + ',');
+    JSONWriteLn(F, Indent + '  "woodColor": ' + IntToStr(WoodColor) + ',');
+    JSONWriteLn(F, Indent + '  "xBlockColor": ' + IntToStr(XBlockColor) + ',');
+    if BuildWall then BW := 1 else BW := 0;
+    JSONWriteLn(F, Indent + '  "buildWall": ' + IntToStr(BW) + ',');
+    JSONWriteLn(F, Indent + '  "startX": ' + IntToStr(InitX) + ',');
+    JSONWriteLn(F, Indent + '  "startY": ' + IntToStr(InitY) + ',');
+    JSONWriteLn(F, Indent + '  "width": ' + IntToStr(XSize) + ',');
+  end;
+
+  { Tiles — 13 rows, stored top-to-bottom }
+  JSONWriteLn(F, Indent + '  "tiles": [');
+  for y := 0 to NV - 1 do
+  begin
+    GameY := NV - 1 - y;
+    JSONWrite(F, Indent + '    "' + EncodeTileRow(GameY, Opts.XSize) + '"');
+    if y < NV - 1 then
+      JSONWriteLn(F, ',')
+    else
+      JSONWriteLn(F, '');
+  end;
+  JSONWriteLn(F, Indent + '  ],');
+
+  { Hidden row }
+  JSONWriteLn(F, Indent + '  "hiddenRow": "' + EncodeTileRow(NV, Opts.XSize) + '"');
+
+  JSONWriteLn(F, Indent + '}');
+end;
+
+function EdSaveLevelJSON(const FileName: AnsiString): Boolean;
+var
+  F: TextFile;
+  i: Integer;
+  SavedActive: Integer;
+begin
+  Result := False;
+  if not LevelLoaded then Exit;
+
+  { Ensure all sub-level buffers are up-to-date }
+  EdSaveActiveToBuffer;
+
+  AssignFile(F, FileName);
+  {$I-}
+  Rewrite(F);
+  {$I+}
+  if IOResult <> 0 then Exit;
+
+  SavedActive := ActiveSubLevel;
+
+  JSONWriteLn(F, '{');
+  JSONWriteLn(F, '  "format": "mario-luigi-level",');
+  JSONWriteLn(F, '  "version": 2,');
+
+  { Root-level metadata from first sub-level }
+  if (NumSubLevels > 0) and (SubLevels[0] <> nil) then
+  begin
+    JSONWriteLn(F, '  "name": "' + JSONEscapeStr(SubLevels[0]^.SLMetaName) + '",');
+    JSONWriteLn(F, '  "creator": "' + JSONEscapeStr(SubLevels[0]^.SLMetaCreator) + '",');
+    JSONWriteLn(F, '  "description": "' + JSONEscapeStr(SubLevels[0]^.SLMetaDescription) + '",');
+  end
+  else
+  begin
+    JSONWriteLn(F, '  "name": "",');
+    JSONWriteLn(F, '  "creator": "",');
+    JSONWriteLn(F, '  "description": "",');
+  end;
+
+  { Sub-levels array }
+  JSONWriteLn(F, '  "sublevels": [');
+  for i := 0 to NumSubLevels - 1 do
+  begin
+    if SubLevels[i] = nil then Continue;
+
+    { Load this sub-level's data into WorldMap so EncodeTileRow can read it }
+    LoadBufferToActive(i);
+
+    WriteSubLevelJSON(F, '    ', SubLevels[i]^.Opts,
+      SubLevels[i]^.TabName,
+      SubLevels[i]^.SLMetaName,
+      SubLevels[i]^.SLMetaCreator,
+      SubLevels[i]^.SLMetaDescription);
+
+    if i < NumSubLevels - 1 then
+      JSONWriteLn(F, '    ,');  { comma between array elements }
+  end;
+  JSONWriteLn(F, '  ]');
+
+  JSONWriteLn(F, '}');
+
+  CloseFile(F);
+
+  { Restore the originally active sub-level }
+  ActiveSubLevel := SavedActive;
+  LoadBufferToActive(SavedActive);
+  ReinitRenderState;
+
+  Result := True;
+end;
+
+{ ===== JSON Load ===== }
+
+{ Helper: skip whitespace in buffer }
+function SkipWS(const Buf: AnsiString; Pos: Integer): Integer;
+begin
+  while (Pos <= Length(Buf)) and (Buf[Pos] in [' ', #9, #10, #13]) do
+    Inc(Pos);
+  Result := Pos;
+end;
+
+{ Helper: find a JSON key in the buffer, returns position after the colon.
+  Searches from StartPos. Returns 0 if not found. }
+function FindKey(const Buf: AnsiString; const Key: AnsiString; StartPos: Integer): Integer;
+var
+  P, KLen: Integer;
+  SearchStr: AnsiString;
+begin
+  Result := 0;
+  SearchStr := '"' + Key + '"';
+  KLen := Length(SearchStr);
+  P := StartPos;
+  while P <= Length(Buf) - KLen + 1 do
+  begin
+    if Copy(Buf, P, KLen) = SearchStr then
+    begin
+      P := P + KLen;
+      P := SkipWS(Buf, P);
+      if (P <= Length(Buf)) and (Buf[P] = ':') then
+      begin
+        Result := P + 1;
+        Exit;
+      end;
+    end;
+    Inc(P);
+  end;
+end;
+
+{ Helper: read an integer value from buffer at Pos }
+function ReadJSONInt(const Buf: AnsiString; Pos: Integer; out Value: Integer): Integer;
+var
+  Start: Integer;
+  S: AnsiString;
+begin
+  Pos := SkipWS(Buf, Pos);
+  Start := Pos;
+  if (Pos <= Length(Buf)) and (Buf[Pos] = '-') then Inc(Pos);
+  while (Pos <= Length(Buf)) and (Buf[Pos] in ['0'..'9']) do
+    Inc(Pos);
+  S := Copy(Buf, Start, Pos - Start);
+  Value := StrToIntDef(S, 0);
+  Result := Pos;
+end;
+
+{ Helper: read a JSON string value (between quotes) from buffer at Pos.
+  Handles \" and \\ escapes. }
+function ReadJSONStr(const Buf: AnsiString; Pos: Integer; out Value: AnsiString): Integer;
+begin
+  Value := '';
+  Pos := SkipWS(Buf, Pos);
+  if (Pos > Length(Buf)) or (Buf[Pos] <> '"') then
+  begin
+    Result := Pos;
+    Exit;
+  end;
+  Inc(Pos); { skip opening quote }
+  while (Pos <= Length(Buf)) and (Buf[Pos] <> '"') do
+  begin
+    if (Buf[Pos] = '\') and (Pos + 1 <= Length(Buf)) then
+    begin
+      Inc(Pos);
+      Value := Value + Buf[Pos];
+    end
+    else
+      Value := Value + Buf[Pos];
+    Inc(Pos);
+  end;
+  if (Pos <= Length(Buf)) and (Buf[Pos] = '"') then
+    Inc(Pos); { skip closing quote }
+  Result := Pos;
+end;
+
+{ Helper: read a JSON key's integer value }
+function GetJSONInt(const Buf: AnsiString; const Key: AnsiString; Default: Integer): Integer;
+var
+  P: Integer;
+begin
+  P := FindKey(Buf, Key, 1);
+  if P = 0 then
+  begin
+    Result := Default;
+    Exit;
+  end;
+  ReadJSONInt(Buf, P, Result);
+end;
+
+{ Helper: read a JSON key's string value }
+function GetJSONStr(const Buf: AnsiString; const Key: AnsiString; const Default: AnsiString): AnsiString;
+var
+  P: Integer;
+begin
+  P := FindKey(Buf, Key, 1);
+  if P = 0 then
+  begin
+    Result := Default;
+    Exit;
+  end;
+  ReadJSONStr(Buf, P, Result);
+end;
+
+{ Helper: decode a tile row string into WorldMap.
+  Printable chars → as-is. $XX → hex byte. }
+procedure DecodeTileRow(const S: AnsiString; TileY, XSize: Integer);
+var
+  i, x: Integer;
+  b: Byte;
+  HexStr: AnsiString;
+begin
+  i := 1;
+  x := 0;
+  while (i <= Length(S)) and (x < XSize) do
+  begin
+    if (S[i] = '$') and (i + 2 <= Length(S)) then
+    begin
+      HexStr := Copy(S, i + 1, 2);
+      b := StrToIntDef('$' + HexStr, 0);
+      WorldMap^[x, TileY] := Chr(b);
+      Inc(i, 3);
+    end
+    else
+    begin
+      WorldMap^[x, TileY] := S[i];
+      Inc(i);
+    end;
+    Inc(x);
+  end;
+  { Fill remaining columns with spaces }
+  while x < XSize do
+  begin
+    WorldMap^[x, TileY] := ' ';
+    Inc(x);
+  end;
+end;
+
+{ Find the tiles array in JSON and decode all rows }
+procedure DecodeTilesArray(const Buf: AnsiString; XSize: Integer);
+var
+  P, RowIdx, GameY: Integer;
+  RowStr: AnsiString;
+begin
+  P := FindKey(Buf, 'tiles', 1);
+  if P = 0 then Exit;
+
+  P := SkipWS(Buf, P);
+  if (P > Length(Buf)) or (Buf[P] <> '[') then Exit;
+  Inc(P); { skip '[' }
+
+  for RowIdx := 0 to NV - 1 do
+  begin
+    P := SkipWS(Buf, P);
+    if P > Length(Buf) then Exit;
+    P := ReadJSONStr(Buf, P, RowStr);
+    GameY := NV - 1 - RowIdx;  { JSON row 0 = top = game Y=12 }
+    DecodeTileRow(RowStr, GameY, XSize);
+    P := SkipWS(Buf, P);
+    if (P <= Length(Buf)) and (Buf[P] = ',') then Inc(P);
+  end;
+end;
+
+{ Decode the hidden row from JSON }
+procedure DecodeHiddenRow(const Buf: AnsiString; XSize: Integer);
+var
+  P: Integer;
+  RowStr: AnsiString;
+begin
+  P := FindKey(Buf, 'hiddenRow', 1);
+  if P = 0 then Exit;
+  ReadJSONStr(Buf, P, RowStr);
+  DecodeTileRow(RowStr, NV, XSize);
+end;
+
+{ Forward declaration for v2 JSON loader }
+function LoadJSONv2(const Buf: AnsiString): Boolean; forward;
+
+function EdLoadLevelJSON(const FileName: AnsiString): Boolean;
+var
+  F: File;
+  Buf: AnsiString;
+  FileSize: LongInt;
+  BytesRead: LongInt;
+  XSz: Integer;
+  JSONVer: Integer;
+begin
+  Result := False;
+  if not Initialized then Exit;
+
+  { Read entire file into buffer }
+  AssignFile(F, FileName);
+  {$I-}
+  Reset(F, 1);
+  {$I+}
+  if IOResult <> 0 then Exit;
+
+  FileSize := System.FileSize(F);
+  if (FileSize < 10) or (FileSize > 1024 * 1024) then
+  begin
+    CloseFile(F);
+    Exit;
+  end;
+
+  SetLength(Buf, FileSize);
+  BlockRead(F, Buf[1], FileSize, BytesRead);
+  CloseFile(F);
+  if BytesRead <> FileSize then Exit;
+
+  { Validate format }
+  if Pos('"mario-luigi-level"', Buf) = 0 then Exit;
+
+  { Free existing sub-level buffers }
+  FreeAllSubLevels;
+
+  { Check version — v2 has "sublevels" array, v1 is flat format }
+  JSONVer := GetJSONInt(Buf, 'version', 1);
+
+  if (JSONVer >= 2) and (FindKey(Buf, 'sublevels', 1) > 0) then
+  begin
+    { === JSON v2: Parse sublevels array === }
+    Result := LoadJSONv2(Buf);
+    Exit;
+  end;
+
+  { === JSON v1: Flat format — single sub-level === }
+
+  { Parse metadata }
+  MetaName := GetJSONStr(Buf, 'name', '');
+  MetaCreator := GetJSONStr(Buf, 'creator', '');
+  MetaDescription := GetJSONStr(Buf, 'description', '');
+
+  { Restore sprites before re-initializing }
+  RestoreSpriteBackups;
+
+  { Parse theme options }
+  with Options do
+  begin
+    Design := GetJSONInt(Buf, 'design', 1);
+    SkyType := GetJSONInt(Buf, 'skyType', 0);
+    WallType1 := GetJSONInt(Buf, 'wallType1', 0);
+    WallType2 := GetJSONInt(Buf, 'wallType2', 0);
+    WallType3 := GetJSONInt(Buf, 'wallType3', 0);
+    PipeColor := GetJSONInt(Buf, 'pipeColor', 0);
+    GroundColor1 := GetJSONInt(Buf, 'groundColor1', 0);
+    GroundColor2 := GetJSONInt(Buf, 'groundColor2', 0);
+    Horizon := GetJSONInt(Buf, 'horizon', 6);
+    BackGrType := GetJSONInt(Buf, 'backGrType', 1);
+    BackGrColor1 := GetJSONInt(Buf, 'backGrColor1', 0);
+    BackGrColor2 := GetJSONInt(Buf, 'backGrColor2', 0);
+    Stars := GetJSONInt(Buf, 'stars', 0);
+    Clouds := GetJSONInt(Buf, 'clouds', 3);
+    C2r := GetJSONInt(Buf, 'c2r', 20);
+    C2g := GetJSONInt(Buf, 'c2g', 30);
+    C2b := GetJSONInt(Buf, 'c2b', 63);
+    C3r := GetJSONInt(Buf, 'c3r', 40);
+    C3g := GetJSONInt(Buf, 'c3g', 50);
+    C3b := GetJSONInt(Buf, 'c3b', 60);
+    BrickColor := GetJSONInt(Buf, 'brickColor', 0);
+    WoodColor := GetJSONInt(Buf, 'woodColor', 0);
+    XBlockColor := GetJSONInt(Buf, 'xBlockColor', 0);
+    BuildWall := GetJSONInt(Buf, 'buildWall', 1) <> 0;
+    InitX := GetJSONInt(Buf, 'startX', 2);
+    InitY := GetJSONInt(Buf, 'startY', 10);
+  end;
+
+  { Parse size }
+  XSz := GetJSONInt(Buf, 'width', 236);
+  if (XSz < 1) or (XSz > MaxWorldSize) then XSz := 236;
+  Options.XSize := XSz;
+
+  { Clear WorldMap }
+  FillChar(WorldMap^, SizeOf(WorldBuffer), ' ');
+
+  { Parse tile data }
+  DecodeTilesArray(Buf, Options.XSize);
+
+  { Parse hidden row }
+  DecodeHiddenRow(Buf, Options.XSize);
+
+  { Initialize sub-level system with single sub-level }
+  AllocSubLevel(0);
+  Move(WorldMap^, SubLevels[0]^.WorldSnap, SizeOf(WorldBuffer));
+  SubLevels[0]^.Opts := Options;
+  SubLevels[0]^.TabName := 'Level A';
+  SubLevels[0]^.SLMetaName := MetaName;
+  SubLevels[0]^.SLMetaCreator := MetaCreator;
+  SubLevels[0]^.SLMetaDescription := MetaDescription;
+  NumSubLevels := 1;
+  ActiveSubLevel := 0;
+
+  { Initialize rendering state from Options (same as EdLoadLevel) }
+  with Options do
+  begin
+    InitSky(SkyType);
+    InitWalls(WallType1, WallType2, WallType3);
+    InitPipes(PipeColor);
+    InitBackGr(BackGrType, Clouds);
+  end;
+
+  BuildWorld;
+  NewPalette(P256^);
+  SetSkyPalette;
+  InitGrass;
+  DrawPalBackGr;
+  InitWaterfallPalette;
+  InitDecoSpritePalette;
+  ReadPalette(Palette);
+
+  LevelLoaded := True;
+
+  EnsureBricks;
+  EdBuildTileAtlas;
+  EdBuildEnemyAtlas;
+  EdBuildPlayerSprite;
+  EdBuildSkyPreview;
+
+  Result := True;
+end;
+
+{ ===== JSON v2 Load (sublevels array) ===== }
+
+// Find the end of a JSON object starting at Pos (should point to open-brace).
+// Handles nested objects and strings. Returns position after closing brace.
+function FindObjectEnd(const Buf: AnsiString; StartPos: Integer): Integer;
+var
+  P, Depth: Integer;
+  InStr: Boolean;
+begin
+  Result := 0;
+  P := StartPos;
+  if (P > Length(Buf)) or (Buf[P] <> '{') then Exit;
+  Depth := 0;
+  InStr := False;
+  while P <= Length(Buf) do
+  begin
+    if InStr then
+    begin
+      if (Buf[P] = '\') and (P + 1 <= Length(Buf)) then
+        Inc(P)  { skip escaped char }
+      else if Buf[P] = '"' then
+        InStr := False;
+    end
+    else
+    begin
+      case Buf[P] of
+        '"': InStr := True;
+        '{': Inc(Depth);
+        '}': begin
+               Dec(Depth);
+               if Depth = 0 then
+               begin
+                 Result := P + 1;
+                 Exit;
+               end;
+             end;
+      end;
+    end;
+    Inc(P);
+  end;
+end;
+
+{ Find a JSON key within a bounded range [StartPos..EndPos).
+  Returns position after the colon, or 0 if not found. }
+function FindKeyInRange(const Buf: AnsiString; const Key: AnsiString;
+  StartPos, EndPos: Integer): Integer;
+var
+  P, KLen: Integer;
+  SearchStr: AnsiString;
+begin
+  Result := 0;
+  SearchStr := '"' + Key + '"';
+  KLen := Length(SearchStr);
+  P := StartPos;
+  while P <= EndPos - KLen do
+  begin
+    if Copy(Buf, P, KLen) = SearchStr then
+    begin
+      P := P + KLen;
+      P := SkipWS(Buf, P);
+      if (P <= EndPos) and (Buf[P] = ':') then
+      begin
+        Result := P + 1;
+        Exit;
+      end;
+    end;
+    Inc(P);
+  end;
+end;
+
+{ Read an integer value within a range }
+function GetJSONIntInRange(const Buf: AnsiString; const Key: AnsiString;
+  StartPos, EndPos, Default: Integer): Integer;
+var
+  P: Integer;
+begin
+  P := FindKeyInRange(Buf, Key, StartPos, EndPos);
+  if P = 0 then
+  begin
+    Result := Default;
+    Exit;
+  end;
+  ReadJSONInt(Buf, P, Result);
+end;
+
+{ Read a string value within a range }
+function GetJSONStrInRange(const Buf: AnsiString; const Key: AnsiString;
+  StartPos, EndPos: Integer; const Default: AnsiString): AnsiString;
+var
+  P: Integer;
+begin
+  P := FindKeyInRange(Buf, Key, StartPos, EndPos);
+  if P = 0 then
+  begin
+    Result := Default;
+    Exit;
+  end;
+  ReadJSONStr(Buf, P, Result);
+end;
+
+{ Decode tiles array within a bounded range }
+procedure DecodeTilesArrayInRange(const Buf: AnsiString; XSize: Integer;
+  StartPos, EndPos: Integer);
+var
+  P, RowIdx, GameY: Integer;
+  RowStr: AnsiString;
+begin
+  P := FindKeyInRange(Buf, 'tiles', StartPos, EndPos);
+  if P = 0 then Exit;
+
+  P := SkipWS(Buf, P);
+  if (P > Length(Buf)) or (Buf[P] <> '[') then Exit;
+  Inc(P);
+
+  for RowIdx := 0 to NV - 1 do
+  begin
+    P := SkipWS(Buf, P);
+    if P > Length(Buf) then Exit;
+    P := ReadJSONStr(Buf, P, RowStr);
+    GameY := NV - 1 - RowIdx;
+    DecodeTileRow(RowStr, GameY, XSize);
+    P := SkipWS(Buf, P);
+    if (P <= Length(Buf)) and (Buf[P] = ',') then Inc(P);
+  end;
+end;
+
+{ Decode hidden row within a bounded range }
+procedure DecodeHiddenRowInRange(const Buf: AnsiString; XSize: Integer;
+  StartPos, EndPos: Integer);
+var
+  P: Integer;
+  RowStr: AnsiString;
+begin
+  P := FindKeyInRange(Buf, 'hiddenRow', StartPos, EndPos);
+  if P = 0 then Exit;
+  ReadJSONStr(Buf, P, RowStr);
+  DecodeTileRow(RowStr, NV, XSize);
+end;
+
+{ Parse a sub-level object bounded by [ObjStart..ObjEnd) into
+  the current WorldMap^ and Options. }
+procedure ParseSubLevelObject(const Buf: AnsiString; ObjStart, ObjEnd: Integer);
+var
+  XSz: Integer;
+begin
+  with Options do
+  begin
+    Design := GetJSONIntInRange(Buf, 'design', ObjStart, ObjEnd, 1);
+    SkyType := GetJSONIntInRange(Buf, 'skyType', ObjStart, ObjEnd, 0);
+    WallType1 := GetJSONIntInRange(Buf, 'wallType1', ObjStart, ObjEnd, 0);
+    WallType2 := GetJSONIntInRange(Buf, 'wallType2', ObjStart, ObjEnd, 0);
+    WallType3 := GetJSONIntInRange(Buf, 'wallType3', ObjStart, ObjEnd, 0);
+    PipeColor := GetJSONIntInRange(Buf, 'pipeColor', ObjStart, ObjEnd, 0);
+    GroundColor1 := GetJSONIntInRange(Buf, 'groundColor1', ObjStart, ObjEnd, 0);
+    GroundColor2 := GetJSONIntInRange(Buf, 'groundColor2', ObjStart, ObjEnd, 0);
+    Horizon := GetJSONIntInRange(Buf, 'horizon', ObjStart, ObjEnd, 6);
+    BackGrType := GetJSONIntInRange(Buf, 'backGrType', ObjStart, ObjEnd, 1);
+    BackGrColor1 := GetJSONIntInRange(Buf, 'backGrColor1', ObjStart, ObjEnd, 0);
+    BackGrColor2 := GetJSONIntInRange(Buf, 'backGrColor2', ObjStart, ObjEnd, 0);
+    Stars := GetJSONIntInRange(Buf, 'stars', ObjStart, ObjEnd, 0);
+    Clouds := GetJSONIntInRange(Buf, 'clouds', ObjStart, ObjEnd, 3);
+    C2r := GetJSONIntInRange(Buf, 'c2r', ObjStart, ObjEnd, 20);
+    C2g := GetJSONIntInRange(Buf, 'c2g', ObjStart, ObjEnd, 30);
+    C2b := GetJSONIntInRange(Buf, 'c2b', ObjStart, ObjEnd, 63);
+    C3r := GetJSONIntInRange(Buf, 'c3r', ObjStart, ObjEnd, 40);
+    C3g := GetJSONIntInRange(Buf, 'c3g', ObjStart, ObjEnd, 50);
+    C3b := GetJSONIntInRange(Buf, 'c3b', ObjStart, ObjEnd, 60);
+    BrickColor := GetJSONIntInRange(Buf, 'brickColor', ObjStart, ObjEnd, 0);
+    WoodColor := GetJSONIntInRange(Buf, 'woodColor', ObjStart, ObjEnd, 0);
+    XBlockColor := GetJSONIntInRange(Buf, 'xBlockColor', ObjStart, ObjEnd, 0);
+    BuildWall := GetJSONIntInRange(Buf, 'buildWall', ObjStart, ObjEnd, 1) <> 0;
+    InitX := GetJSONIntInRange(Buf, 'startX', ObjStart, ObjEnd, 2);
+    InitY := GetJSONIntInRange(Buf, 'startY', ObjStart, ObjEnd, 10);
+  end;
+
+  XSz := GetJSONIntInRange(Buf, 'width', ObjStart, ObjEnd, 236);
+  if (XSz < 1) or (XSz > MaxWorldSize) then XSz := 236;
+  Options.XSize := XSz;
+
+  FillChar(WorldMap^, SizeOf(WorldBuffer), ' ');
+  DecodeTilesArrayInRange(Buf, Options.XSize, ObjStart, ObjEnd);
+  DecodeHiddenRowInRange(Buf, Options.XSize, ObjStart, ObjEnd);
+end;
+
+function LoadJSONv2(const Buf: AnsiString): Boolean;
+var
+  P, ArrStart, ObjStart, ObjEnd: Integer;
+  SLIdx: Integer;
+  TabName, SLName, SLCreator, SLDesc: AnsiString;
+begin
+  Result := False;
+
+  RestoreSpriteBackups;
+
+  { Find the sublevels array }
+  P := FindKey(Buf, 'sublevels', 1);
+  if P = 0 then Exit;
+  P := SkipWS(Buf, P);
+  if (P > Length(Buf)) or (Buf[P] <> '[') then Exit;
+  ArrStart := P;
+  Inc(P);
+
+  SLIdx := 0;
+  while (P <= Length(Buf)) and (SLIdx < MAX_SUB_LEVELS) do
+  begin
+    P := SkipWS(Buf, P);
+    if (P > Length(Buf)) or (Buf[P] = ']') then Break;
+
+    { Expect start of object }
+    if Buf[P] <> '{' then Break;
+    ObjStart := P;
+    ObjEnd := FindObjectEnd(Buf, ObjStart);
+    if ObjEnd = 0 then Break;
+
+    { Parse this sub-level }
+    TabName := GetJSONStrInRange(Buf, 'name', ObjStart, ObjEnd, 'Sub-level ' + Chr(Ord('A') + SLIdx));
+    SLName := GetJSONStrInRange(Buf, 'levelName', ObjStart, ObjEnd, '');
+    SLCreator := GetJSONStrInRange(Buf, 'creator', ObjStart, ObjEnd, '');
+    SLDesc := GetJSONStrInRange(Buf, 'description', ObjStart, ObjEnd, '');
+
+    ParseSubLevelObject(Buf, ObjStart, ObjEnd);
+
+    { Snapshot into sub-level buffer }
+    AllocSubLevel(SLIdx);
+    Move(WorldMap^, SubLevels[SLIdx]^.WorldSnap, SizeOf(WorldBuffer));
+    SubLevels[SLIdx]^.Opts := Options;
+    SubLevels[SLIdx]^.TabName := TabName;
+    SubLevels[SLIdx]^.SLMetaName := SLName;
+    SubLevels[SLIdx]^.SLMetaCreator := SLCreator;
+    SubLevels[SLIdx]^.SLMetaDescription := SLDesc;
+
+    Inc(SLIdx);
+    P := ObjEnd;
+
+    { Skip comma between array elements }
+    P := SkipWS(Buf, P);
+    if (P <= Length(Buf)) and (Buf[P] = ',') then Inc(P);
+  end;
+
+  if SLIdx = 0 then Exit;  { No sub-levels found }
+
+  NumSubLevels := SLIdx;
+  ActiveSubLevel := 0;
+
+  { Load first sub-level as active }
+  LoadBufferToActive(0);
+
+  { Set metadata from first sub-level or root level }
+  MetaName := GetJSONStr(Buf, 'name', SubLevels[0]^.SLMetaName);
+  MetaCreator := GetJSONStr(Buf, 'creator', SubLevels[0]^.SLMetaCreator);
+  MetaDescription := GetJSONStr(Buf, 'description', SubLevels[0]^.SLMetaDescription);
+
+  { Initialize rendering }
+  ReinitRenderState;
+  LevelLoaded := True;
+
+  Result := True;
+end;
+
+var
+  _InitIdx: Integer;
 begin
   Initialized := False;
   LevelLoaded := False;
@@ -1567,4 +2949,8 @@ begin
   AtlasTexture := 0;
   EnemyAtlasTexture := 0;
   PlayerSprTexture := 0;
+  for _InitIdx := 0 to MAX_SUB_LEVELS - 1 do
+    SubLevels[_InitIdx] := nil;
+  NumSubLevels := 0;
+  ActiveSubLevel := 0;
 end.

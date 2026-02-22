@@ -762,6 +762,7 @@ implementation
     SetSkyPalette;
     DrawPalBackGr;
     InitGrass;
+    InitDecoSpritePalette;
 
     if OnlyDraw then
     begin

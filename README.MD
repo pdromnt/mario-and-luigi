@@ -183,6 +183,10 @@ Press **F12** during gameplay to open the debug menu. Options:
 | Power Up            | Give fire flower power                       |
 | Resume              | Close debug menu and continue playing        |
 
+## Level Editor
+
+A visual level editor is included in the `editor/` folder. It uses the game's actual rendering pipeline with a Dear ImGui interface for browsing, editing, and saving levels. See **[editor/EDITOR.md](editor/EDITOR.md)** for full documentation including controls, features, and the save file format.
+
 ## Levels
 
 The game features 6 worlds with a second harder "Turbo" loop after completion (12 progression stages total). See **[LEVELS.md](LEVELS.md)** for a complete level map, visual themes, pipe system details, and progression breakdown.
@@ -218,6 +222,7 @@ sdl2_port/
   data/              Level data, fonts, palettes, backgrounds
   music/             Background music tracks (.ogg)
   SDL2-for-Pascal/   SDL2 Pascal bindings (MPL/zlib licensed)
+  editor/            Visual level editor (SDL2 + OpenGL3 + Dear ImGui)
 ```
 
 ## Credits

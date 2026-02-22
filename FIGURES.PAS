@@ -68,6 +68,87 @@ interface
   procedure SaveSpriteBackups;
   procedure RestoreSpriteBackups;
 
+  { --- Per-Tile Color System --- }
+  { Pre-colored sprite arrays for per-tile color independence.
+    These allow mixing different pipe colors, brick colors, XBlock colors,
+    wood colors, and wall styles in a single level without relying on
+    Options.PipeColor / Options.BrickColor / etc. }
+
+  const
+    { Color byte values used by ReColor }
+    PIPE_COLORS: array[0..5] of Byte = ($18, $30, $50, $70, $80, $B0);
+    BRICK_COLORS: array[0..3] of Byte = ($18, $30, $48, $B0);
+    XBLOCK_COLORS: array[0..3] of Byte = ($30, $68, $A0, $B0);
+    WOOD_COLORS: array[0..2] of Byte = ($18, $30, $48);
+
+    { Character code ranges for per-tile colored variants }
+    CPIPE_BASE   = 178;  { #178..#201: 6 colors x 4 shapes = 24 codes }
+    CBRICK_BASE  = 202;  { #202..#205: 4 brick colors }
+    CXBLOCK_BASE = 206;  { #206..#209: 4 xblock colors }
+    CWOOD_BASE   = 210;  { #210..#212: 3 wood colors }
+    CBREAK_BASE  = 213;  { #213..#216: 4 breakable block colors }
+
+    { Full ground wall variant codes: 5 styles x 9 variants = 45 codes
+      Each style has: TL(0), Top(1), TR(2), Left(3), Body(4), Right(5), BL(6), Bot(7), BR(8) }
+    CWALL_GREEN  = 91;   { #91..#99:   Green wall variants }
+    CWALL_SAND   = 100;  { #100..#108: Sand wall variants }
+    CWALL_BROWN  = 109;  { #109..#117: Brown wall variants }
+    CWALL_GRASS  = 118;  { #118..#126: Grass wall variants }
+    CWALL_DESERT = 139;  { #139..#147: Desert wall variants }
+    WALL_VARIANTS = 9;   { TL, Top, TR, Left, Body, Right, BL, Bottom, BR }
+
+    WALL_STYLE_BASES: array[0..4] of Byte = (
+      CWALL_GREEN, CWALL_SAND, CWALL_BROWN, CWALL_GRASS, CWALL_DESERT
+    );
+
+    { Design-independent deco tile codes (#148..#154)
+      These allow placing any deco variant regardless of level Design. }
+    CDECO_TREE_HASH  = 148;  { Tree trunk (was '#' Design 2) }
+    CDECO_TREE_PCT   = 149;  { Tree leaves (was '%' Design 2) }
+    CDECO_WIN_HASH   = 150;  { Window (was '#' Design 3) }
+    CDECO_WIN_PCT    = 151;  { Window (was '%' Design 3) }
+    CDECO_LAVA_HASH  = 152;  { Lava (was '#' Design 4) }
+    CDECO_LAVA_PCT   = 153;  { Lava (was '%' Design 4) }
+    CDECO_SMTREE     = 154;  { Small Tree (was #240 Design 2) }
+
+  var
+    { Pre-colored pipe sprites: [color_idx 0..5, shape 0..3] }
+    ColorPipes: array[0..5, 0..3] of ImageBuffer;
+
+    { Pre-colored brick sprites (pattern 0 base): [color_idx 0..3] }
+    ColorBricks: array[0..3, 0..2] of ImageBuffer;
+
+    { Pre-colored XBlock sprites: [color_idx 0..3] }
+    ColorXBlocks: array[0..3] of ImageBuffer;
+
+    { Pre-colored Wood sprites: [color_idx 0..2] }
+    ColorWood: array[0..2] of ImageBuffer;
+
+    { Pre-colored Breakable block (J) sprites: [color_idx 0..3] }
+    ColorBreak: array[0..3] of ImageBuffer;
+
+    { Per-style wall variant sprites: [style 0..4, variant 0..8]
+      Variant 0=TL, 1=Top, 2=TR, 3=Left, 4=Body, 5=Right, 6=BL, 7=Bottom, 8=BR }
+    WallVariants: array[0..4, 0..8] of ImageBuffer;
+
+    { Pre-colored deco sprites: Window and Lava with palette indices
+      remapped to safe slots ($B8-$BE) so they render correctly
+      regardless of the level's sky/waterfall palette settings. }
+    DecoWindow000, DecoWindow001: array[0..W*H-1] of Byte;
+    DecoLava000, DecoLava001: array[0..W*H-1] of Byte;
+
+    { Flag: colored sprites have been initialized }
+    ColorSpritesReady: Boolean;
+
+  { Initialize all pre-colored sprite arrays from pristine sprite data.
+    Must be called AFTER SaveSpriteBackups and AFTER palette is loaded. }
+  procedure InitColoredSprites;
+
+  { Set the safe palette slots ($B8-$BE) to correct colors for
+    design-independent Window and Lava deco tiles.
+    Call after palette initialization (NewPalette/SetSkyPalette). }
+  procedure InitDecoSpritePalette;
+
 implementation
 
   { -- Sprite data includes (linear byte-per-pixel format) -- }
@@ -749,6 +830,18 @@ implementation
              end;
 
 
+        { Design-independent deco variants (#148..#154) }
+        #148: Fig := @Tree003;   { Tree trunk — same as '#' Design 2 }
+        #149: Fig := @Tree002;   { Tree leaves — same as '%' Design 2 }
+        #150: Fig := @DecoWindow001; { Window — pre-colored ($B8/$B9) }
+        #151: Fig := @DecoWindow000; { Window — pre-colored ($B8/$B9) }
+        #152: Fig := @DecoLava000;   { Lava — pre-colored ($BA-$BE) }
+        #153: Fig := @DecoLava001;   { Lava — pre-colored ($BA-$BE) }
+        #154: if WorldMap^ [X, Y - 1] <> Ch then
+                Fig := @SmTree000
+              else
+                Fig := @SmTree001;
+
         '#': case Options.Design of
                1: Fig := @Fall000;
                2: case WorldMap^ [X, Y - 1] of
@@ -788,6 +881,68 @@ implementation
                     end;
                   end;
              end;
+
+        { --- Per-tile colored variants --- }
+
+        { Colored pipes #178..#201: 6 colors x 4 shapes }
+        #178..#201:
+          begin
+            Fig := @ColorPipes[(Ord(Ch) - CPIPE_BASE) div 4,
+                               (Ord(Ch) - CPIPE_BASE) mod 4];
+          end;
+
+        { Colored bricks #202..#205: 4 colors, same pattern logic as 'A' }
+        #202..#205:
+          begin
+            L := WorldMap^ [X - 1, Y] in [Ch, 'A', #202..#205];
+            R := WorldMap^ [X + 1, Y] in [Ch, 'A', #202..#205];
+            if Odd (X + Y) then
+            begin
+              RS := True;
+              LS := False;
+            end
+            else
+            begin
+              LS := True;
+              RS := False;
+            end;
+            if (LS and R) then
+              Fig := @ColorBricks[Ord(Ch) - CBRICK_BASE, 1]
+            else
+              if (RS and L) then
+                Fig := @ColorBricks[Ord(Ch) - CBRICK_BASE, 2]
+              else
+                Fig := @ColorBricks[Ord(Ch) - CBRICK_BASE, 0];
+          end;
+
+        { Colored XBlocks #206..#209: 4 colors }
+        #206..#209:
+          Fig := @ColorXBlocks[Ord(Ch) - CXBLOCK_BASE];
+
+        { Colored Wood #210..#212: 3 colors }
+        #210..#212:
+          Fig := @ColorWood[Ord(Ch) - CWOOD_BASE];
+
+        { Colored Breakable blocks #213..#216: 4 colors }
+        #213..#216:
+          Fig := @ColorBreak[Ord(Ch) - CBREAK_BASE];
+
+        { Per-style ground wall variants: 5 styles x 9 edge variants }
+        { Green wall variants #91..#99 }
+        #91..#99:
+          Fig := @WallVariants[0, Ord(Ch) - CWALL_GREEN];
+        { Sand wall variants #100..#108 }
+        #100..#108:
+          Fig := @WallVariants[1, Ord(Ch) - CWALL_SAND];
+        { Brown wall variants #109..#117 }
+        #109..#117:
+          Fig := @WallVariants[2, Ord(Ch) - CWALL_BROWN];
+        { Grass wall variants #118..#126 }
+        #118..#126:
+          Fig := @WallVariants[3, Ord(Ch) - CWALL_GRASS];
+        { Desert wall variants #139..#147 }
+        #139..#147:
+          Fig := @WallVariants[4, Ord(Ch) - CWALL_DESERT];
 
       end;
       if Fig <> Nil then
@@ -999,6 +1154,24 @@ implementation
       'q': GetSpritePtr := @Palm1000;  { palm leaf left }
       'r': GetSpritePtr := @Palm2000;  { palm leaf top }
       'u': GetSpritePtr := @Palm3000;  { palm leaf right }
+      { Deco tiles by game code (for editor tile palette) }
+      '#': GetSpritePtr := @Fall000;   { waterfall/tree/window/lava per Design }
+      '%': GetSpritePtr := @Fall001;
+      #240: GetSpritePtr := @Fence000; { fence/small tree per Design }
+      #246: GetSpritePtr := @WPalm000; { white palm trunk }
+      #247: GetSpritePtr := @Grass2000;{ grass decoration (middle variant) }
+      #250: GetSpritePtr := @Palm0000; { palm center }
+      #244: GetSpritePtr := @Palm1000; { palm left }
+      #249: GetSpritePtr := @Palm2000; { palm top }
+      #245: GetSpritePtr := @Palm3000; { palm right }
+      { Design-independent deco variants }
+      #148: GetSpritePtr := @Tree003;   { tree trunk }
+      #149: GetSpritePtr := @Tree002;   { tree leaves }
+      #150: GetSpritePtr := @DecoWindow001; { window — pre-colored }
+      #151: GetSpritePtr := @DecoWindow000; { window — pre-colored }
+      #152: GetSpritePtr := @DecoLava000;   { lava — pre-colored }
+      #153: GetSpritePtr := @DecoLava001;   { lava — pre-colored }
+      #154: GetSpritePtr := @SmTree000; { small tree (top) }
     else
       GetSpritePtr := nil;
     end;
@@ -1117,6 +1290,165 @@ implementation
     Move(Bak_Block001,  Block001,  SizeOf(ImageBuffer));
     Move(Bak_Wood000,   Wood000,   SizeOf(ImageBuffer));
     Move(Bak_XBlock000, XBlock000, SizeOf(ImageBuffer));
+  end;
+
+  { --- Per-Tile Color System: Initialize pre-colored sprites --- }
+
+  procedure InitColoredSprites;
+  var
+    ci: Integer;
+  begin
+    if not BakSaved then Exit;  { Need pristine backups }
+
+    { Colored pipes: for each of 6 colors, ReColor pristine pipe sprites }
+    for ci := 0 to 5 do
+    begin
+      ReColor(@Bak_Pipe000, @ColorPipes[ci, 0], PIPE_COLORS[ci]);
+      ReColor(@Bak_Pipe001, @ColorPipes[ci, 1], PIPE_COLORS[ci]);
+      ReColor(@Bak_Pipe002, @ColorPipes[ci, 2], PIPE_COLORS[ci]);
+      ReColor(@Bak_Pipe003, @ColorPipes[ci, 3], PIPE_COLORS[ci]);
+    end;
+
+    { Colored bricks: for each of 4 colors, ReColor all 3 brick patterns }
+    for ci := 0 to 3 do
+    begin
+      ReColor(@Brick0000, @ColorBricks[ci, 0], BRICK_COLORS[ci]);
+      ReColor(@Brick0001, @ColorBricks[ci, 1], BRICK_COLORS[ci]);
+      ReColor(@Brick0002, @ColorBricks[ci, 2], BRICK_COLORS[ci]);
+    end;
+
+    { Colored XBlocks: for each of 4 colors }
+    for ci := 0 to 3 do
+      ReColor(@Bak_XBlock000, @ColorXBlocks[ci], XBLOCK_COLORS[ci]);
+
+    { Colored Wood: for each of 3 colors }
+    for ci := 0 to 2 do
+      ReColor(@Bak_Wood000, @ColorWood[ci], WOOD_COLORS[ci]);
+
+    { Colored Breakable blocks (J): for each of 4 colors }
+    for ci := 0 to 3 do
+      ReColor(@Bak_Block001, @ColorBreak[ci], BRICK_COLORS[ci]);
+
+    { Wall variant sprites: 5 styles x 9 variants each (TL,Top,TR,Left,Body,Right,BL,Bot,BR)
+      Generated using same Mirror/Rotate chain as InitWall in FigList.
+      Style 0=Green, 1=Sand, 2=Brown(wall3), 3=Grass(wall4), 4=Desert(wall5) }
+
+    { Style 0: Green }
+    CopySpriteToBuffer(WallVariants[0, 0], Green000, SizeOf(ImageBuffer));  { TL corner }
+    CopySpriteToBuffer(WallVariants[0, 1], Green001, SizeOf(ImageBuffer));  { Top edge }
+    Mirror(@WallVariants[0, 0], @WallVariants[0, 2]);                      { TR = Mirror(TL) }
+    CopySpriteToBuffer(WallVariants[0, 3], Green002, SizeOf(ImageBuffer));  { Left edge }
+    CopySpriteToBuffer(WallVariants[0, 4], Green003, SizeOf(ImageBuffer));  { Body }
+    Rotate(@WallVariants[0, 3], @WallVariants[0, 5]);                      { Right = Rotate(Left) }
+    Rotate(@WallVariants[0, 2], @WallVariants[0, 6]);                      { BL = Rotate(TR) }
+    Rotate(@WallVariants[0, 1], @WallVariants[0, 7]);                      { Bottom = Rotate(Top) }
+    Rotate(@WallVariants[0, 0], @WallVariants[0, 8]);                      { BR = Rotate(TL) }
+
+    { Style 1: Sand }
+    CopySpriteToBuffer(WallVariants[1, 0], Sand000, SizeOf(ImageBuffer));
+    CopySpriteToBuffer(WallVariants[1, 1], Sand001, SizeOf(ImageBuffer));
+    Mirror(@WallVariants[1, 0], @WallVariants[1, 2]);
+    CopySpriteToBuffer(WallVariants[1, 3], Sand002, SizeOf(ImageBuffer));
+    CopySpriteToBuffer(WallVariants[1, 4], Sand003, SizeOf(ImageBuffer));
+    Rotate(@WallVariants[1, 3], @WallVariants[1, 5]);
+    Rotate(@WallVariants[1, 2], @WallVariants[1, 6]);
+    Rotate(@WallVariants[1, 1], @WallVariants[1, 7]);
+    Rotate(@WallVariants[1, 0], @WallVariants[1, 8]);
+
+    { Style 2: Brown (InitWalls type 3) }
+    CopySpriteToBuffer(WallVariants[2, 0], Brown000, SizeOf(ImageBuffer));
+    CopySpriteToBuffer(WallVariants[2, 1], Brown001, SizeOf(ImageBuffer));
+    Mirror(@WallVariants[2, 0], @WallVariants[2, 2]);
+    CopySpriteToBuffer(WallVariants[2, 3], Brown002, SizeOf(ImageBuffer));
+    CopySpriteToBuffer(WallVariants[2, 4], Brown003, SizeOf(ImageBuffer));
+    Rotate(@WallVariants[2, 3], @WallVariants[2, 5]);
+    Rotate(@WallVariants[2, 2], @WallVariants[2, 6]);
+    Rotate(@WallVariants[2, 1], @WallVariants[2, 7]);
+    Rotate(@WallVariants[2, 0], @WallVariants[2, 8]);
+
+    { Style 3: Grass (InitWalls type 4) }
+    CopySpriteToBuffer(WallVariants[3, 0], Grass000, SizeOf(ImageBuffer));
+    CopySpriteToBuffer(WallVariants[3, 1], Grass001, SizeOf(ImageBuffer));
+    Mirror(@WallVariants[3, 0], @WallVariants[3, 2]);
+    CopySpriteToBuffer(WallVariants[3, 3], Grass002, SizeOf(ImageBuffer));
+    CopySpriteToBuffer(WallVariants[3, 4], Grass003, SizeOf(ImageBuffer));
+    Rotate(@WallVariants[3, 3], @WallVariants[3, 5]);
+    Rotate(@WallVariants[3, 2], @WallVariants[3, 6]);
+    Rotate(@WallVariants[3, 1], @WallVariants[3, 7]);
+    Rotate(@WallVariants[3, 0], @WallVariants[3, 8]);
+
+    { Style 4: Desert (InitWalls type 5) }
+    CopySpriteToBuffer(WallVariants[4, 0], Des000, SizeOf(ImageBuffer));
+    CopySpriteToBuffer(WallVariants[4, 1], Des001, SizeOf(ImageBuffer));
+    Mirror(@WallVariants[4, 0], @WallVariants[4, 2]);
+    CopySpriteToBuffer(WallVariants[4, 3], Des002, SizeOf(ImageBuffer));
+    CopySpriteToBuffer(WallVariants[4, 4], Des003, SizeOf(ImageBuffer));
+    Rotate(@WallVariants[4, 3], @WallVariants[4, 5]);
+    Rotate(@WallVariants[4, 2], @WallVariants[4, 6]);
+    Rotate(@WallVariants[4, 1], @WallVariants[4, 7]);
+    Rotate(@WallVariants[4, 0], @WallVariants[4, 8]);
+
+    { Deco sprites: remap conflicting palette indices to safe slots.
+      Window sprites: $F0 -> $B8, $FF -> $B9
+      Lava sprites:   $07 -> $BA, $08 -> $BB, $09 -> $BC, $0A -> $BD, $0B -> $BE }
+    for ci := 0 to W * H - 1 do
+    begin
+      { Window000 }
+      case Window000[ci] of
+        $F0: DecoWindow000[ci] := $B8;
+        $FF: DecoWindow000[ci] := $B9;
+      else
+        DecoWindow000[ci] := Window000[ci];
+      end;
+      { Window001 }
+      case Window001[ci] of
+        $F0: DecoWindow001[ci] := $B8;
+        $FF: DecoWindow001[ci] := $B9;
+      else
+        DecoWindow001[ci] := Window001[ci];
+      end;
+      { Lava000 }
+      case Lava000[ci] of
+        $07: DecoLava000[ci] := $BA;
+        $08: DecoLava000[ci] := $BB;
+        $09: DecoLava000[ci] := $BC;
+        $0A: DecoLava000[ci] := $BD;
+        $0B: DecoLava000[ci] := $BE;
+      else
+        DecoLava000[ci] := Lava000[ci];
+      end;
+      { Lava001 }
+      case Lava001[ci] of
+        $07: DecoLava001[ci] := $BA;
+        $08: DecoLava001[ci] := $BB;
+        $09: DecoLava001[ci] := $BC;
+        $0A: DecoLava001[ci] := $BD;
+        $0B: DecoLava001[ci] := $BE;
+      else
+        DecoLava001[ci] := Lava001[ci];
+      end;
+    end;
+
+    ColorSpritesReady := True;
+  end;
+
+  procedure InitDecoSpritePalette;
+  { Set palette entries $B8-$BE to fixed colors for deco sprites.
+    Window: castle brown tones (from SkyType 8 / BackGrType 4).
+    Lava: orange-red lava colors (from SkyType 6, waterfall frame 0). }
+  begin
+    { Window colors (matching SetWindowPalette / castle theme) }
+    OutPalette($B8, 17, 10, 10);  { was $F0 — dark brown }
+    OutPalette($B9, 20, 14, 14);  { was $FF — light brown }
+
+    { Lava colors (matching SkyType 6 waterfall, frame 0 static snapshot)
+      Formula: SkyType 6..8 → (42+4*k, 5+k*k, 2*k)
+      At frame 0: i=0→k=1, i=1→k=2, i=2→k=3, i=3→k=4, i=4→k=5 }
+    OutPalette($BA, 46,  6,  2);  { was $07 (idx 7), k=1 }
+    OutPalette($BB, 50,  9,  4);  { was $08 (idx 8), k=2 }
+    OutPalette($BC, 54, 14,  6);  { was $09 (idx 9), k=3 }
+    OutPalette($BD, 58, 21,  8);  { was $0A (idx 10), k=4 }
+    OutPalette($BE, 62, 30, 10);  { was $0B (idx 11), k=5 }
   end;
 
 end.
