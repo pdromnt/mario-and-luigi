@@ -12,8 +12,18 @@ if not exist "%FPC%" (
     echo Using %FPC%
 )
 
-set FPC_OPTS=-Mtp -Sg -Si -O2 -dDYNAMIC_LINK -dSDL2
+set FPC_OPTS=-MDelphi -Sg -Si -O2 -dDYNAMIC_LINK -dSDL2
 set IMGUI=ImGui-Pascal
+
+REM Check for ImGui-Pascal dependency
+if not exist "%IMGUI%\src\PasImGui.pas" (
+    echo.
+    echo ERROR: ImGui-Pascal not found!
+    echo Run setup first:  powershell -ExecutionPolicy Bypass -File setup_imgui.ps1
+    echo.
+    pause
+    exit /b 1
+)
 
 REM Unit search paths:
 REM   OUT first so fresh editor PPU/O files take priority over stale game builds in ..\OUT

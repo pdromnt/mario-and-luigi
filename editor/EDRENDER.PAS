@@ -51,6 +51,10 @@ function EdGetTileAt(TileX, TileY: Integer): Char;
   Returns #0 if coordinates are out of bounds. }
 function EdSetTileAt(TileX, TileY: Integer; NewChar: Char): Char;
 
+{ Bulk tile operations for region copy/paste }
+procedure EdGetTileRegion(X1, Y1, X2, Y2: Integer; out Buf: AnsiString);
+function EdPasteTileRegion(DstX, DstY, W, H: Integer; const Buf: AnsiString): Integer;
+
 { Get tile width and height in pixels }
 function EdGetTileW: Integer;
 function EdGetTileH: Integer;
@@ -67,11 +71,13 @@ procedure EdSetPlayerStartY(TileY: Integer);
 { Get level XSize (number of horizontal tiles) }
 function EdGetLevelXSize: Integer;
 
-{ Get level theme options }
+{ Get/set level theme options }
 function EdGetSkyType: Integer;
 function EdGetBackGrType: Integer;
 function EdGetClouds: Integer;
 function EdGetHorizon: Integer;
+procedure EdSetSkyType(V: Integer);
+procedure EdSetBackGrType(V: Integer);
 
 { Level metadata getters/setters }
 function EdGetLevelName: AnsiString;
@@ -80,6 +86,8 @@ function EdGetLevelCreator: AnsiString;
 procedure EdSetLevelCreator(const S: AnsiString);
 function EdGetLevelDescription: AnsiString;
 procedure EdSetLevelDescription(const S: AnsiString);
+function EdGetMusicTrack: AnsiString;
+procedure EdSetMusicTrack(const S: AnsiString);
 
 { --- Tile Atlas for Palette Panel --- }
 
@@ -288,6 +296,7 @@ type
     SLMetaName: AnsiString;     { Level name }
     SLMetaCreator: AnsiString;
     SLMetaDescription: AnsiString;
+    SLMusicTrack: AnsiString;   { Music track filename (e.g. "level1.ogg"), empty = default }
   end;
   PSubLevelData = ^TSubLevelData;
 
@@ -534,6 +543,7 @@ var
   MetaName: AnsiString;
   MetaCreator: AnsiString;
   MetaDescription: AnsiString;
+  MusicTrack: AnsiString;  { Music track filename, empty = default }
 
 procedure EdRenderInit;
 begin
@@ -695,6 +705,7 @@ begin
   SubLevels[0]^.SLMetaName := '';
   SubLevels[0]^.SLMetaCreator := '';
   SubLevels[0]^.SLMetaDescription := '';
+  SubLevels[0]^.SLMusicTrack := '';
 
   { Capture sub-level B (currently in SaveWorldMap/SaveOptions) }
   AllocSubLevel(1);
@@ -704,6 +715,7 @@ begin
   SubLevels[1]^.SLMetaName := '';
   SubLevels[1]^.SLMetaCreator := '';
   SubLevels[1]^.SLMetaDescription := '';
+  SubLevels[1]^.SLMusicTrack := '';
 
   NumSubLevels := 2;
 
@@ -975,6 +987,33 @@ begin
     Result := #0;
 end;
 
+procedure EdGetTileRegion(X1, Y1, X2, Y2: Integer; out Buf: AnsiString);
+var RW, RH, X, Y, Idx: Integer;
+begin
+  RW := X2 - X1 + 1; RH := Y2 - Y1 + 1;
+  SetLength(Buf, RW * RH);
+  Idx := 1;
+  for Y := Y1 to Y2 do
+    for X := X1 to X2 do begin
+      Buf[Idx] := EdGetTileAt(X, Y);
+      Inc(Idx);
+    end;
+end;
+
+function EdPasteTileRegion(DstX, DstY, W, H: Integer; const Buf: AnsiString): Integer;
+var X, Y, Idx: Integer; OldCh: Char;
+begin
+  Result := 0; Idx := 1;
+  for Y := 0 to H - 1 do
+    for X := 0 to W - 1 do begin
+      if Idx <= Length(Buf) then begin
+        OldCh := EdSetTileAt(DstX + X, DstY + Y, Buf[Idx]);
+        if (OldCh <> #0) and (OldCh <> Buf[Idx]) then Inc(Result);
+      end;
+      Inc(Idx);
+    end;
+end;
+
 function EdGetTileW: Integer;
 begin
   Result := W;
@@ -1036,6 +1075,16 @@ begin
   if LevelLoaded then Result := Options.BackGrType else Result := 0;
 end;
 
+procedure EdSetSkyType(V: Integer);
+begin
+  if LevelLoaded then Options.SkyType := V;
+end;
+
+procedure EdSetBackGrType(V: Integer);
+begin
+  if LevelLoaded then Options.BackGrType := V;
+end;
+
 function EdGetClouds: Integer;
 begin
   if LevelLoaded then Result := Options.Clouds else Result := 0;
@@ -1078,6 +1127,16 @@ begin
   MetaDescription := S;
 end;
 
+function EdGetMusicTrack: AnsiString;
+begin
+  Result := MusicTrack;
+end;
+
+procedure EdSetMusicTrack(const S: AnsiString);
+begin
+  MusicTrack := S;
+end;
+
 { --- Sub-Level Management --- }
 
 procedure AllocSubLevel(Index: Integer);
@@ -1115,6 +1174,7 @@ begin
   SubLevels[ActiveSubLevel]^.SLMetaName := MetaName;
   SubLevels[ActiveSubLevel]^.SLMetaCreator := MetaCreator;
   SubLevels[ActiveSubLevel]^.SLMetaDescription := MetaDescription;
+  SubLevels[ActiveSubLevel]^.SLMusicTrack := MusicTrack;
 end;
 
 { Restore WorldMap/Options/metadata from a sub-level buffer }
@@ -1127,6 +1187,7 @@ begin
   MetaName := SubLevels[Index]^.SLMetaName;
   MetaCreator := SubLevels[Index]^.SLMetaCreator;
   MetaDescription := SubLevels[Index]^.SLMetaDescription;
+  MusicTrack := SubLevels[Index]^.SLMusicTrack;
 end;
 
 { Re-initialize all rendering state from current Options (same as EdLoadLevel tail) }
@@ -2225,7 +2286,7 @@ end;
   Reads tile data from the current WorldMap^.
   Indent is the base indentation string (e.g. '    ' for nested in array). }
 procedure WriteSubLevelJSON(var F: TextFile; const Indent: AnsiString;
-  const Opts: WorldOptions; const TabName, SLName, SLCreator, SLDesc: AnsiString);
+  const Opts: WorldOptions; const TabName, SLName, SLCreator, SLDesc, SLMusic: AnsiString);
 var
   y, GameY, BW: Integer;
 begin
@@ -2234,6 +2295,8 @@ begin
   JSONWriteLn(F, Indent + '  "levelName": "' + JSONEscapeStr(SLName) + '",');
   JSONWriteLn(F, Indent + '  "creator": "' + JSONEscapeStr(SLCreator) + '",');
   JSONWriteLn(F, Indent + '  "description": "' + JSONEscapeStr(SLDesc) + '",');
+  if SLMusic <> '' then
+    JSONWriteLn(F, Indent + '  "musicTrack": "' + JSONEscapeStr(SLMusic) + '",');
 
   with Opts do
   begin
@@ -2337,7 +2400,8 @@ begin
       SubLevels[i]^.TabName,
       SubLevels[i]^.SLMetaName,
       SubLevels[i]^.SLMetaCreator,
-      SubLevels[i]^.SLMetaDescription);
+      SubLevels[i]^.SLMetaDescription,
+      SubLevels[i]^.SLMusicTrack);
 
     if i < NumSubLevels - 1 then
       JSONWriteLn(F, '    ,');  { comma between array elements }
@@ -2911,6 +2975,7 @@ begin
     SubLevels[SLIdx]^.SLMetaName := SLName;
     SubLevels[SLIdx]^.SLMetaCreator := SLCreator;
     SubLevels[SLIdx]^.SLMetaDescription := SLDesc;
+    SubLevels[SLIdx]^.SLMusicTrack := GetJSONStrInRange(Buf, 'musicTrack', ObjStart, ObjEnd, '');
 
     Inc(SLIdx);
     P := ObjEnd;

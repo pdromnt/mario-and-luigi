@@ -18,6 +18,7 @@ interface
     Txt,
     Music,
     BGMusic,
+    CustomLv,
     KeyBoard,
     Joystick,
     sdl2;
@@ -692,6 +693,26 @@ implementation
         PlaySubLevelMusic
       else
         PlayLevelMusic(Ord(N2) - Ord('0'));
+    end
+    else if N2 = 'C' then
+    begin
+      { Custom level -- use custom music track if set }
+      if InSubWorld then
+      begin
+        if CustomMusicB <> '' then
+          PlayMusicByName(CustomMusicB)
+        else if CustomMusicA <> '' then
+          PlayMusicByName(CustomMusicA)
+        else
+          PlayLevelMusic(1);
+      end
+      else
+      begin
+        if CustomMusicA <> '' then
+          PlayMusicByName(CustomMusicA)
+        else
+          PlayLevelMusic(1);
+      end;
     end
     else if PlayingMacro and (MacroHdr.Level <= 5) then
     begin

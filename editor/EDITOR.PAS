@@ -114,6 +114,37 @@ var
   { Player start drag-to-reposition state }
   DraggingPlayerStart: Boolean = False;
 
+  { Region selection state }
+  SelectionActive: Boolean = False;
+  SelectionDragging: Boolean = False;
+  SelStartX, SelStartY: Integer;
+  SelEndX, SelEndY: Integer;
+  SelMinX, SelMinY, SelMaxX, SelMaxY: Integer;
+
+  { Clipboard }
+  ClipBuf: AnsiString;
+  ClipWidth: Integer = 0;
+  ClipHeight: Integer = 0;
+  PastePreviewActive: Boolean = False;
+
+  { File dialog state }
+  FileDialogActive: Boolean = False;
+  FileDialogIsSave: Boolean = False;
+  FileDialogDir: AnsiString;
+  FileDialogFiles: array of AnsiString;
+  FileDialogDirs: array of AnsiString;
+  FileDialogSelected: Integer = -1;
+  FileDialogNameBuf: array[0..255] of AnsiChar;
+  FileDialogTitle: AnsiString;
+  FileDialogResult: AnsiString;
+  FileDialogConfirmed: Boolean = False;
+
+  { Current file path (empty = unsaved) }
+  CurrentFilePath: AnsiString = '';
+
+  { Shortcuts window }
+  ShowShortcutsWindow: Boolean = False;
+
   { Pipe match code popup state }
   ShowPipePopup: Boolean = False;
   PipePopupTX: Integer = -1;
@@ -133,7 +164,7 @@ var
 
 const
   MAX_UNDO_STEPS = 200;
-  MAX_CHANGES_PER_STROKE = 512;
+  MAX_CHANGES_PER_STROKE = 4096;
   SAVE_FILE_NAME = 'level_edit.json';
 
 type
@@ -259,8 +290,14 @@ begin
   IsErasing := False;
   LastPaintTileX := -1;
   LastPaintTileY := -1;
+  SelectionActive := False;
+  SelectionDragging := False;
+  PastePreviewActive := False;
   EditorDirty := False;
 end;
+
+{ Forward declarations }
+procedure UpdateWindowTitle; forward;
 
 { Copy metadata from EdRender's AnsiString vars into char buffers for ImGui.InputText }
 procedure SyncMetaBuffersFromEdRender;
@@ -314,8 +351,10 @@ begin
   SkyBrowserDirty := False;
   { Reset editing state on level switch }
   ResetEditingState;
+  CurrentFilePath := '';
   { Sync metadata buffers from EdRender }
   SyncMetaBuffersFromEdRender;
+  UpdateWindowTitle;
 end;
 
 { --- Undo/Redo System --- }
@@ -472,12 +511,158 @@ begin
   SelectedIsEnemy := False;
 end;
 
-{ Update the window title to reflect dirty state }
+{ --- Selection helpers --- }
+
+procedure NormalizeSelection;
+begin
+  if SelStartX <= SelEndX then begin SelMinX := SelStartX; SelMaxX := SelEndX; end
+  else begin SelMinX := SelEndX; SelMaxX := SelStartX; end;
+  if SelStartY <= SelEndY then begin SelMinY := SelStartY; SelMaxY := SelEndY; end
+  else begin SelMinY := SelEndY; SelMaxY := SelStartY; end;
+  if SelMinX < 0 then SelMinX := 0;
+  if SelMinY < 0 then SelMinY := 0;
+  if SelMaxX >= EdGetLevelXSize then SelMaxX := EdGetLevelXSize - 1;
+  if SelMaxY >= EdGetNV then SelMaxY := EdGetNV - 1;
+end;
+
+procedure ClearSelection;
+begin
+  SelectionActive := False;
+  SelectionDragging := False;
+end;
+
+{ --- Clipboard operations --- }
+
+procedure DoCopy;
+begin
+  if not SelectionActive then Exit;
+  ClipWidth := SelMaxX - SelMinX + 1;
+  ClipHeight := SelMaxY - SelMinY + 1;
+  EdGetTileRegion(SelMinX, SelMinY, SelMaxX, SelMaxY, ClipBuf);
+end;
+
+procedure DoCut;
+var X, Y: Integer;
+begin
+  if not SelectionActive then Exit;
+  DoCopy;
+  BeginStroke;
+  for Y := SelMinY to SelMaxY do
+    for X := SelMinX to SelMaxX do
+      PlaceTile(X, Y, ' ');
+  FinalizeStroke;
+  ClearSelection;
+end;
+
+procedure DoPaste;
+begin
+  if (ClipWidth <= 0) or (ClipHeight <= 0) then Exit;
+  PastePreviewActive := True;
+  ClearSelection;
+end;
+
+procedure CommitPaste(AtX, AtY: Integer);
+var X, Y, Idx: Integer; Ch: Char;
+begin
+  BeginStroke;
+  Idx := 1;
+  for Y := 0 to ClipHeight - 1 do
+    for X := 0 to ClipWidth - 1 do begin
+      if Idx <= Length(ClipBuf) then begin
+        Ch := ClipBuf[Idx];
+        PlaceTile(AtX + X, AtY + Y, Ch);
+      end;
+      Inc(Idx);
+    end;
+  FinalizeStroke;
+  PastePreviewActive := False;
+end;
+
+procedure DoFill;
+var X, Y: Integer;
+begin
+  if (not SelectionActive) or (SelectedCharCode = 0) then Exit;
+  BeginStroke;
+  for Y := SelMinY to SelMaxY do
+    for X := SelMinX to SelMaxX do
+      PlaceTile(X, Y, Chr(SelectedCharCode));
+  FinalizeStroke;
+end;
+
+procedure DoDeleteSelection;
+var X, Y: Integer;
+begin
+  if not SelectionActive then Exit;
+  BeginStroke;
+  for Y := SelMinY to SelMaxY do
+    for X := SelMinX to SelMaxX do
+      PlaceTile(X, Y, ' ');
+  FinalizeStroke;
+  ClearSelection;
+end;
+
+{ --- File dialog helpers --- }
+
+procedure FileDialogScanDir;
+var SR: TSearchRec; Dir: AnsiString;
+begin
+  SetLength(FileDialogFiles, 0);
+  SetLength(FileDialogDirs, 0);
+  FileDialogSelected := -1;
+  Dir := IncludeTrailingPathDelimiter(FileDialogDir);
+
+  if FindFirst(Dir + '*', faDirectory, SR) = 0 then begin
+    repeat
+      if ((SR.Attr and faDirectory) <> 0) and (SR.Name <> '.') then begin
+        SetLength(FileDialogDirs, Length(FileDialogDirs) + 1);
+        FileDialogDirs[High(FileDialogDirs)] := SR.Name;
+      end;
+    until FindNext(SR) <> 0;
+    SysUtils.FindClose(SR);
+  end;
+
+  if FindFirst(Dir + '*.json', faAnyFile, SR) = 0 then begin
+    repeat
+      if (SR.Attr and faDirectory) = 0 then begin
+        SetLength(FileDialogFiles, Length(FileDialogFiles) + 1);
+        FileDialogFiles[High(FileDialogFiles)] := SR.Name;
+      end;
+    until FindNext(SR) <> 0;
+    SysUtils.FindClose(SR);
+  end;
+end;
+
+procedure OpenFileDialog(IsSave: Boolean; const Title, DefaultDir, DefaultName: AnsiString);
+begin
+  FileDialogIsSave := IsSave;
+  FileDialogTitle := Title;
+  FileDialogConfirmed := False;
+  FileDialogResult := '';
+  FileDialogActive := True;
+
+  if DefaultDir <> '' then
+    FileDialogDir := DefaultDir
+  else if CurrentFilePath <> '' then
+    FileDialogDir := ExtractFilePath(CurrentFilePath)
+  else
+    FileDialogDir := GetCurrentDir;
+
+  FillChar(FileDialogNameBuf, SizeOf(FileDialogNameBuf), 0);
+  if DefaultName <> '' then
+    StrLCopy(@FileDialogNameBuf[0], PAnsiChar(DefaultName), 255);
+
+  FileDialogScanDir;
+end;
+
+{ Update the window title to reflect dirty state and current file }
 procedure UpdateWindowTitle;
 var
   Title: AnsiString;
 begin
-  Title := 'Mario && Luigi Level Editor';
+  if CurrentFilePath <> '' then
+    Title := 'Mario && Luigi Level Editor - ' + ExtractFileName(CurrentFilePath)
+  else
+    Title := 'Mario && Luigi Level Editor';
   if EditorDirty then
     Title := '* ' + Title;
   SDL_SetWindowTitle(Window, PAnsiChar(Title));
@@ -803,6 +988,21 @@ var
   SubTabOpen: Boolean;
   SubTabName: AnsiString;
   SubTabFlags: ImGuiTabItemFlags;
+  { Selection + paste overlays }
+  SelP1, SelP2: ImVec2;
+  PasteX, PasteY: Integer;
+  PasteCh: Char;
+  PasteTileIdx: Integer;
+  PasteEntry: TTileAtlasEntry;
+  PasteP1, PasteP2, PasteUV0, PasteUV1: ImVec2;
+  { File dialog }
+  FDI: Integer;
+  FDEntry: AnsiString;
+  FDFullPath: AnsiString;
+  { Music track combo }
+  CurMusic: AnsiString;
+  MusicPreview: AnsiString;
+  MusicChanged: Boolean;
 begin
   { Start ImGui frame }
   ImGui_OpenGL3_NewFrame();
@@ -838,24 +1038,23 @@ begin
         ImGui.EndMenu();
       end;
       ImGui.Separator();
-      if ImGui.MenuItem('Save Level', 'Ctrl+S', False, True) then
+      if ImGui.MenuItem('Save', 'Ctrl+S', False, EdIsLevelLoaded) then
       begin
         SyncMetaBuffersToEdRender;
-        if EdSaveLevelJSON(SAVE_FILE_NAME) then
-          EditorDirty := False;
+        if CurrentFilePath <> '' then begin
+          if EdSaveLevelJSON(CurrentFilePath) then begin
+            EditorDirty := False; UpdateWindowTitle; end;
+        end else
+          OpenFileDialog(True, 'Save Level', '', 'level.json');
       end;
-      if ImGui.MenuItem('Load Level', 'Ctrl+O', False, True) then
+      if ImGui.MenuItem('Save As...', 'Ctrl+Shift+S', False, EdIsLevelLoaded) then
       begin
-        if EdLoadLevelJSON(SAVE_FILE_NAME) then
-        begin
-          NeedRerender := True;
-          BrowseSkyType := EdGetSkyType;
-          BrowseBgType := EdGetBackGrType;
-          SkyBrowserDirty := False;
-          ResetEditingState;
-          SyncMetaBuffersFromEdRender;
-        end;
+        SyncMetaBuffersToEdRender;
+        OpenFileDialog(True, 'Save Level As', '', ExtractFileName(CurrentFilePath));
       end;
+      ImGui.Separator();
+      if ImGui.MenuItem('Open Level...', 'Ctrl+O', False, True) then
+        OpenFileDialog(False, 'Open Level', '', '');
       {$IFDEF WINDOWS}
       ImGui.Separator();
       if ImGui.MenuItem('Test Play', 'F5', False, EdIsLevelLoaded and (not TestPlayActive)) then
@@ -873,6 +1072,17 @@ begin
         DoUndo;
       if ImGui.MenuItem('Redo', 'Ctrl+Y', False, CanRedo) then
         DoRedo;
+      ImGui.Separator();
+      if ImGui.MenuItem('Copy', 'Ctrl+C', False, SelectionActive) then
+        DoCopy;
+      if ImGui.MenuItem('Cut', 'Ctrl+X', False, SelectionActive) then
+        DoCut;
+      if ImGui.MenuItem('Paste', 'Ctrl+V', False, ClipWidth > 0) then
+        DoPaste;
+      if ImGui.MenuItem('Fill Selection', 'Ctrl+F', False, SelectionActive and (SelectedCharCode > 0)) then
+        DoFill;
+      if ImGui.MenuItem('Delete Selection', 'Del', False, SelectionActive) then
+        DoDeleteSelection;
       ImGui.EndMenu();
     end;
 
@@ -903,6 +1113,8 @@ begin
 
     if ImGui.BeginMenu('Help', True) then
     begin
+      if ImGui.MenuItem('Keyboard Shortcuts...', nil, False, True) then
+        ShowShortcutsWindow := True;
       if ImGui.MenuItem('About...', nil, False, True) then
         ShowAbout := True;
       ImGui.EndMenu();
@@ -1010,6 +1222,181 @@ begin
       ImGui.CloseCurrentPopup();
     end;
     ImGui.EndPopup();
+  end;
+
+  { --- File Dialog --- }
+  if FileDialogActive then
+  begin
+    ImGui.OpenPopup(PAnsiChar(FileDialogTitle), ImGuiPopupFlags_None);
+    ImGui.SetNextWindowSize(ImVec2.New(600, 400), ImGuiCond_FirstUseEver);
+    if ImGui.BeginPopupModal(PAnsiChar(FileDialogTitle), nil, ImGuiWindowFlags_None) then
+    begin
+      ImGui.Text(PAnsiChar(AnsiString('Directory: ' + FileDialogDir)));
+      ImGui.Separator();
+
+      if ImGui.BeginChild('FileList', ImVec2.New(0, -60), ImGuiChildFlags_Border, ImGuiWindowFlags_None) then
+      begin
+        { Directories }
+        for FDI := 0 to Length(FileDialogDirs) - 1 do
+        begin
+          FDEntry := '[' + FileDialogDirs[FDI] + ']';
+          if ImGui.Selectable(PAnsiChar(AnsiString(FDEntry + '##dir' + IntToStr(FDI))),
+             False, ImGuiSelectableFlags_AllowDoubleClick) then
+          begin
+            if ImGui.IsMouseDoubleClicked(ImGuiMouseButton_Left) then
+            begin
+              if FileDialogDirs[FDI] = '..' then
+                FileDialogDir := ExtractFilePath(ExcludeTrailingPathDelimiter(FileDialogDir))
+              else
+                FileDialogDir := IncludeTrailingPathDelimiter(FileDialogDir) + FileDialogDirs[FDI];
+              FileDialogDir := ExpandFileName(FileDialogDir);
+              FileDialogScanDir;
+            end;
+          end;
+        end;
+
+        { Files }
+        for FDI := 0 to Length(FileDialogFiles) - 1 do
+        begin
+          FDEntry := FileDialogFiles[FDI];
+          if ImGui.Selectable(PAnsiChar(AnsiString(FDEntry + '##file' + IntToStr(FDI))),
+             FDI = FileDialogSelected, ImGuiSelectableFlags_AllowDoubleClick) then
+          begin
+            FileDialogSelected := FDI;
+            if FileDialogIsSave then
+              StrLCopy(@FileDialogNameBuf[0], PAnsiChar(FDEntry), 255);
+
+            if (not FileDialogIsSave) and ImGui.IsMouseDoubleClicked(ImGuiMouseButton_Left) then
+            begin
+              FileDialogResult := IncludeTrailingPathDelimiter(FileDialogDir) + FDEntry;
+              FileDialogConfirmed := True;
+              FileDialogActive := False;
+              ImGui.CloseCurrentPopup();
+            end;
+          end;
+        end;
+        ImGui.EndChild();
+      end;
+
+      if FileDialogIsSave then
+      begin
+        ImGui.Text('Filename:');
+        ImGui.SameLine(0, 8);
+        ImGui.PushItemWidth(-160);
+        ImGui.InputText('##FileName', @FileDialogNameBuf[0], 256,
+          ImGuiInputTextFlags_None, nil, nil);
+        ImGui.PopItemWidth();
+      end;
+
+      ImGui.Separator();
+      if FileDialogIsSave then
+      begin
+        if ImGui.Button('Save', ImVec2.New(100, 0)) then
+        begin
+          if FileDialogNameBuf[0] <> #0 then begin
+            FDFullPath := IncludeTrailingPathDelimiter(FileDialogDir) +
+              AnsiString(PAnsiChar(@FileDialogNameBuf[0]));
+            if LowerCase(ExtractFileExt(FDFullPath)) <> '.json' then
+              FDFullPath := FDFullPath + '.json';
+            FileDialogResult := FDFullPath;
+            FileDialogConfirmed := True;
+            FileDialogActive := False;
+            ImGui.CloseCurrentPopup();
+          end;
+        end;
+      end
+      else begin
+        if ImGui.Button('Open', ImVec2.New(100, 0)) then
+        begin
+          if (FileDialogSelected >= 0) and (FileDialogSelected < Length(FileDialogFiles)) then
+          begin
+            FileDialogResult := IncludeTrailingPathDelimiter(FileDialogDir) +
+              FileDialogFiles[FileDialogSelected];
+            FileDialogConfirmed := True;
+            FileDialogActive := False;
+            ImGui.CloseCurrentPopup();
+          end;
+        end;
+      end;
+
+      ImGui.SameLine(0, 8);
+      if ImGui.Button('Cancel', ImVec2.New(100, 0)) then
+      begin
+        FileDialogActive := False;
+        ImGui.CloseCurrentPopup();
+      end;
+
+      ImGui.EndPopup();
+    end;
+  end;
+
+  { Handle file dialog result }
+  if FileDialogConfirmed then
+  begin
+    FileDialogConfirmed := False;
+    if FileDialogIsSave then
+    begin
+      SyncMetaBuffersToEdRender;
+      if EdSaveLevelJSON(FileDialogResult) then begin
+        CurrentFilePath := FileDialogResult;
+        EditorDirty := False;
+        UpdateWindowTitle;
+      end;
+    end
+    else begin
+      if EdLoadLevelJSON(FileDialogResult) then begin
+        CurrentFilePath := FileDialogResult;
+        NeedRerender := True;
+        BrowseSkyType := EdGetSkyType;
+        BrowseBgType := EdGetBackGrType;
+        SkyBrowserDirty := False;
+        ResetEditingState;
+        SyncMetaBuffersFromEdRender;
+        UpdateWindowTitle;
+      end;
+    end;
+  end;
+
+  { --- Keyboard Shortcuts Window --- }
+  if ShowShortcutsWindow then
+  begin
+    ImGui.SetNextWindowSize(ImVec2.New(420, 500), ImGuiCond_FirstUseEver);
+    if ImGui.Begin_('Keyboard Shortcuts', @ShowShortcutsWindow, ImGuiWindowFlags_None) then
+    begin
+      if ImGui.BeginTable('Shortcuts', 2,
+         ImGuiTableFlags_RowBg or ImGuiTableFlags_Borders) then
+      begin
+        ImGui.TableSetupColumn('Shortcut', ImGuiTableColumnFlags_WidthFixed, 140, 0);
+        ImGui.TableSetupColumn('Action', ImGuiTableColumnFlags_WidthStretch, 0, 0);
+        ImGui.TableHeadersRow();
+
+        ImGui.TableNextRow(ImGuiTableRowFlags_None, 0); ImGui.TableSetColumnIndex(0); ImGui.Text('Ctrl+S'); ImGui.TableSetColumnIndex(1); ImGui.Text('Save level');
+        ImGui.TableNextRow(ImGuiTableRowFlags_None, 0); ImGui.TableSetColumnIndex(0); ImGui.Text('Ctrl+Shift+S'); ImGui.TableSetColumnIndex(1); ImGui.Text('Save level as...');
+        ImGui.TableNextRow(ImGuiTableRowFlags_None, 0); ImGui.TableSetColumnIndex(0); ImGui.Text('Ctrl+O'); ImGui.TableSetColumnIndex(1); ImGui.Text('Open level...');
+        ImGui.TableNextRow(ImGuiTableRowFlags_None, 0); ImGui.TableSetColumnIndex(0); ImGui.Text('Ctrl+Z'); ImGui.TableSetColumnIndex(1); ImGui.Text('Undo');
+        ImGui.TableNextRow(ImGuiTableRowFlags_None, 0); ImGui.TableSetColumnIndex(0); ImGui.Text('Ctrl+Y'); ImGui.TableSetColumnIndex(1); ImGui.Text('Redo');
+        ImGui.TableNextRow(ImGuiTableRowFlags_None, 0); ImGui.TableSetColumnIndex(0); ImGui.Text('Ctrl+C'); ImGui.TableSetColumnIndex(1); ImGui.Text('Copy selection');
+        ImGui.TableNextRow(ImGuiTableRowFlags_None, 0); ImGui.TableSetColumnIndex(0); ImGui.Text('Ctrl+X'); ImGui.TableSetColumnIndex(1); ImGui.Text('Cut selection');
+        ImGui.TableNextRow(ImGuiTableRowFlags_None, 0); ImGui.TableSetColumnIndex(0); ImGui.Text('Ctrl+V'); ImGui.TableSetColumnIndex(1); ImGui.Text('Paste');
+        ImGui.TableNextRow(ImGuiTableRowFlags_None, 0); ImGui.TableSetColumnIndex(0); ImGui.Text('Ctrl+F'); ImGui.TableSetColumnIndex(1); ImGui.Text('Fill selection with tile');
+        ImGui.TableNextRow(ImGuiTableRowFlags_None, 0); ImGui.TableSetColumnIndex(0); ImGui.Text('Delete'); ImGui.TableSetColumnIndex(1); ImGui.Text('Delete selection');
+        ImGui.TableNextRow(ImGuiTableRowFlags_None, 0); ImGui.TableSetColumnIndex(0); ImGui.Text('Escape'); ImGui.TableSetColumnIndex(1); ImGui.Text('Cancel paste / clear selection / deselect');
+        ImGui.TableNextRow(ImGuiTableRowFlags_None, 0); ImGui.TableSetColumnIndex(0); ImGui.Text('1 / 2 / 3'); ImGui.TableSetColumnIndex(1); ImGui.Text('Zoom 1x / 2x / 3x');
+        ImGui.TableNextRow(ImGuiTableRowFlags_None, 0); ImGui.TableSetColumnIndex(0); ImGui.Text('G'); ImGui.TableSetColumnIndex(1); ImGui.Text('Toggle grid');
+        ImGui.TableNextRow(ImGuiTableRowFlags_None, 0); ImGui.TableSetColumnIndex(0); ImGui.Text('M'); ImGui.TableSetColumnIndex(1); ImGui.Text('Toggle markers');
+        ImGui.TableNextRow(ImGuiTableRowFlags_None, 0); ImGui.TableSetColumnIndex(0); ImGui.Text('F5'); ImGui.TableSetColumnIndex(1); ImGui.Text('Test play level');
+        ImGui.TableNextRow(ImGuiTableRowFlags_None, 0); ImGui.TableSetColumnIndex(0); ImGui.Text('Shift+Drag'); ImGui.TableSetColumnIndex(1); ImGui.Text('Select tile region');
+        ImGui.TableNextRow(ImGuiTableRowFlags_None, 0); ImGui.TableSetColumnIndex(0); ImGui.Text('Left / Right'); ImGui.TableSetColumnIndex(1); ImGui.Text('Scroll viewport');
+        ImGui.TableNextRow(ImGuiTableRowFlags_None, 0); ImGui.TableSetColumnIndex(0); ImGui.Text('Middle Drag'); ImGui.TableSetColumnIndex(1); ImGui.Text('Pan viewport');
+        ImGui.TableNextRow(ImGuiTableRowFlags_None, 0); ImGui.TableSetColumnIndex(0); ImGui.Text('Left Click'); ImGui.TableSetColumnIndex(1); ImGui.Text('Paint tile / commit paste');
+        ImGui.TableNextRow(ImGuiTableRowFlags_None, 0); ImGui.TableSetColumnIndex(0); ImGui.Text('Right Click'); ImGui.TableSetColumnIndex(1); ImGui.Text('Erase tile / cancel paste');
+        ImGui.TableNextRow(ImGuiTableRowFlags_None, 0); ImGui.TableSetColumnIndex(0); ImGui.Text('Alt+Click'); ImGui.TableSetColumnIndex(1); ImGui.Text('Eyedropper (pick tile)');
+        ImGui.TableNextRow(ImGuiTableRowFlags_None, 0); ImGui.TableSetColumnIndex(0); ImGui.Text('Shift+Click Pipe'); ImGui.TableSetColumnIndex(1); ImGui.Text('Set pipe match code');
+
+        ImGui.EndTable();
+      end;
+    end;
+    ImGui.End_();
   end;
 
   { --- Update window title when dirty state changes --- }
@@ -1392,7 +1779,7 @@ begin
           DrawList^.AddRectFilled(HighRect1, HighRect2, HighlightCol);
         end;
 
-        { --- Paint / Erase / Eyedropper --- }
+        { --- Paint / Erase / Eyedropper / Selection --- }
         KeyMods := Integer(SDL_GetModState());
 
         { Alt+Left-click = eyedropper }
@@ -1400,33 +1787,66 @@ begin
         begin
           EyedropperPick(HoverTileX, HoverTileY);
         end
-        { Shift+Left-click on pipe = open match code popup }
-        else if ((KeyMods and Integer(KMOD_SHIFT)) <> 0) and ImGui.IsMouseClicked(ImGuiMouseButton_Left) then
+        { Paste preview: left-click commits, right-click cancels }
+        else if PastePreviewActive and ImGui.IsMouseClicked(ImGuiMouseButton_Left) and
+           (not IsDragging) then
         begin
-          { Check if clicking on or near a pipe top-left tile }
-          if (HoverTileChar = '0') or
-             ((HoverTileChar = '1') and (HoverTileX > 0) and (EdGetTileAt(HoverTileX - 1, HoverTileY) = '0')) then
+          CommitPaste(HoverTileX, HoverTileY);
+        end
+        else if PastePreviewActive and ImGui.IsMouseClicked(ImGuiMouseButton_Right) then
+        begin
+          PastePreviewActive := False;
+        end
+        { Shift+drag = region selection (unless on pipe top-left which opens pipe popup) }
+        else if ((KeyMods and Integer(KMOD_SHIFT)) <> 0) and
+           ImGui.IsMouseDown(ImGuiMouseButton_Left) and
+           (not IsDragging) and (not PastePreviewActive) then
+        begin
+          if not SelectionDragging then
           begin
-            if HoverTileChar = '1' then
-              PipePopupTX := HoverTileX - 1
-            else
-              PipePopupTX := HoverTileX;
-            PipePopupTY := HoverTileY;
-            { Read current match code }
-            if PipePopupTY > 0 then
+            if ImGui.IsMouseClicked(ImGuiMouseButton_Left) then
             begin
-              FillChar(PipePopupMatchBuf, SizeOf(PipePopupMatchBuf), 0);
-              PipeAbove := EdGetTileAt(PipePopupTX + 1, PipePopupTY - 1);
-              if (PipeAbove <> ' ') and (PipeAbove <> #0) then
-                PipePopupMatchBuf[0] := PipeAbove;
-              ShowPipePopup := True;
-              ImGui.OpenPopup('PipeMatchPopup', ImGuiPopupFlags_None);
+              { Check if clicking on a pipe top-left tile — if so, open pipe popup instead }
+              if (HoverTileChar = '0') or
+                 ((HoverTileChar = '1') and (HoverTileX > 0) and (EdGetTileAt(HoverTileX - 1, HoverTileY) = '0')) then
+              begin
+                if HoverTileChar = '1' then
+                  PipePopupTX := HoverTileX - 1
+                else
+                  PipePopupTX := HoverTileX;
+                PipePopupTY := HoverTileY;
+                if PipePopupTY > 0 then
+                begin
+                  FillChar(PipePopupMatchBuf, SizeOf(PipePopupMatchBuf), 0);
+                  PipeAbove := EdGetTileAt(PipePopupTX + 1, PipePopupTY - 1);
+                  if (PipeAbove <> ' ') and (PipeAbove <> #0) then
+                    PipePopupMatchBuf[0] := PipeAbove;
+                  ShowPipePopup := True;
+                  ImGui.OpenPopup('PipeMatchPopup', ImGuiPopupFlags_None);
+                end;
+              end
+              else
+              begin
+                { Start region selection }
+                SelectionDragging := True;
+                SelectionActive := True;
+                SelStartX := HoverTileX; SelStartY := HoverTileY;
+                SelEndX := HoverTileX; SelEndY := HoverTileY;
+                NormalizeSelection;
+              end;
             end;
+          end
+          else
+          begin
+            { Continue dragging — update end point }
+            SelEndX := HoverTileX; SelEndY := HoverTileY;
+            NormalizeSelection;
           end;
         end
         { Left-click drag = paint selected tile OR drag-reposition enemy/player start }
         else if ImGui.IsMouseDown(ImGuiMouseButton_Left) and (not IsDragging) and
            (not DraggingEnemy) and (not DraggingPlayerStart) and
+           (not SelectionDragging) and (not PastePreviewActive) and
            ((KeyMods and Integer(KMOD_ALT)) = 0) then
         begin
           if SelectedCharCode > 0 then
@@ -1473,7 +1893,8 @@ begin
         end;
 
         { Right-click drag = erase (place space) }
-        if ImGui.IsMouseDown(ImGuiMouseButton_Right) and (not IsDragging) then
+        if ImGui.IsMouseDown(ImGuiMouseButton_Right) and (not IsDragging) and
+           (not SelectionDragging) and (not PastePreviewActive) then
         begin
           if not IsErasing then
           begin
@@ -1564,6 +1985,9 @@ begin
       end;
       DraggingPlayerStart := False;
     end;
+    { Finalize selection drag when mouse released }
+    if SelectionDragging and (not ImGui.IsMouseDown(ImGuiMouseButton_Left)) then
+      SelectionDragging := False;
 
     { Draw grid overlay — lines align to tile boundaries accounting for scroll }
     if ShowGrid then
@@ -2005,6 +2429,50 @@ begin
         DrawList^.AddText(TextPos, $FF000000, @CamLockBuf[0], nil);
       end;
 
+      { --- Selection Rectangle Overlay --- }
+      if SelectionActive then
+      begin
+        SelP1.x := ImgMin.x + (SelMinX * EdGetTileW - ScrollX) * ZoomLevel;
+        SelP1.y := ImgMin.y + SelMinY * TileH;
+        SelP2.x := ImgMin.x + ((SelMaxX + 1) * EdGetTileW - ScrollX) * ZoomLevel;
+        SelP2.y := ImgMin.y + (SelMaxY + 1) * TileH;
+        DrawList^.AddRectFilled(SelP1, SelP2, $300080FF);
+        DrawList^.AddRect(SelP1, SelP2, $FFFFFFFF, 0, ImDrawFlags_None, 2.0);
+      end;
+
+      { --- Paste Preview Overlay --- }
+      if PastePreviewActive and (ClipWidth > 0) and (HoverTileX >= 0) then
+      begin
+        for PasteY := 0 to ClipHeight - 1 do
+          for PasteX := 0 to ClipWidth - 1 do
+          begin
+            PasteCh := ClipBuf[(PasteY * ClipWidth) + PasteX + 1];
+            if PasteCh <> ' ' then
+            begin
+              PasteTileIdx := EdFindTileAtlasIndex(Ord(PasteCh));
+              if PasteTileIdx >= 0 then
+              begin
+                PasteEntry := EdGetTileAtlasEntry(PasteTileIdx);
+                PasteP1.x := ImgMin.x + ((HoverTileX + PasteX) * EdGetTileW - ScrollX) * ZoomLevel;
+                PasteP1.y := ImgMin.y + (HoverTileY + PasteY) * TileH;
+                PasteP2.x := PasteP1.x + TileW;
+                PasteP2.y := PasteP1.y + TileH;
+                PasteUV0.x := PasteEntry.AtlasCol / ATLAS_COLS;
+                PasteUV0.y := PasteEntry.AtlasRow / ATLAS_ROWS;
+                PasteUV1.x := (PasteEntry.AtlasCol + 1) / ATLAS_COLS;
+                PasteUV1.y := (PasteEntry.AtlasRow + 1) / ATLAS_ROWS;
+                DrawList^.AddImage(Pointer(PtrUInt(EdGetAtlasTexture)),
+                  PasteP1, PasteP2, PasteUV0, PasteUV1, $80FFFFFF);
+              end;
+            end;
+          end;
+        PasteP1.x := ImgMin.x + (HoverTileX * EdGetTileW - ScrollX) * ZoomLevel;
+        PasteP1.y := ImgMin.y + HoverTileY * TileH;
+        PasteP2.x := PasteP1.x + ClipWidth * TileW;
+        PasteP2.y := PasteP1.y + ClipHeight * TileH;
+        DrawList^.AddRect(PasteP1, PasteP2, $FF00FF00, 0, ImDrawFlags_None, 2.0);
+      end;
+
       DrawList^.PopClipRect;
     end;
   end
@@ -2022,10 +2490,42 @@ begin
     + ' (' + IntToStr(EdGetSkyType) + ')'));
   ImGui.Text(AnsiString('BG:    ' + EdGetBackGrTypeName(EdGetBackGrType)
     + ' (' + IntToStr(EdGetBackGrType) + ')'));
-  if (CurrentLevel mod 2) = 1 then
-    ImGui.Text('Music: sublevel.ogg')
+  { Music track combo box }
+  ImGui.Text('Music:');
+  ImGui.SameLine(0, 4);
+  ImGui.PushItemWidth(160);
+  CurMusic := EdGetMusicTrack;
+  if CurMusic = '' then
+    MusicPreview := '(default)'
   else
-    ImGui.Text(AnsiString('Music: level' + IntToStr(CurrentLevel div 2 + 1) + '.ogg'));
+    MusicPreview := CurMusic;
+  MusicChanged := False;
+  if ImGui.BeginCombo('##MusicTrack', MusicPreview, ImGuiComboFlags_None) then
+  begin
+    if ImGui.Selectable('(default)', CurMusic = '', ImGuiSelectableFlags_None, ImVec2.New(0, 0)) then
+    begin EdSetMusicTrack(''); MusicChanged := True; end;
+    if ImGui.Selectable('level1.ogg', CurMusic = 'level1.ogg', ImGuiSelectableFlags_None, ImVec2.New(0, 0)) then
+    begin EdSetMusicTrack('level1.ogg'); MusicChanged := True; end;
+    if ImGui.Selectable('level2.ogg', CurMusic = 'level2.ogg', ImGuiSelectableFlags_None, ImVec2.New(0, 0)) then
+    begin EdSetMusicTrack('level2.ogg'); MusicChanged := True; end;
+    if ImGui.Selectable('level3.ogg', CurMusic = 'level3.ogg', ImGuiSelectableFlags_None, ImVec2.New(0, 0)) then
+    begin EdSetMusicTrack('level3.ogg'); MusicChanged := True; end;
+    if ImGui.Selectable('level4.ogg', CurMusic = 'level4.ogg', ImGuiSelectableFlags_None, ImVec2.New(0, 0)) then
+    begin EdSetMusicTrack('level4.ogg'); MusicChanged := True; end;
+    if ImGui.Selectable('level5.ogg', CurMusic = 'level5.ogg', ImGuiSelectableFlags_None, ImVec2.New(0, 0)) then
+    begin EdSetMusicTrack('level5.ogg'); MusicChanged := True; end;
+    if ImGui.Selectable('level6.ogg', CurMusic = 'level6.ogg', ImGuiSelectableFlags_None, ImVec2.New(0, 0)) then
+    begin EdSetMusicTrack('level6.ogg'); MusicChanged := True; end;
+    if ImGui.Selectable('sublevel.ogg', CurMusic = 'sublevel.ogg', ImGuiSelectableFlags_None, ImVec2.New(0, 0)) then
+    begin EdSetMusicTrack('sublevel.ogg'); MusicChanged := True; end;
+    if ImGui.Selectable('menu.ogg', CurMusic = 'menu.ogg', ImGuiSelectableFlags_None, ImVec2.New(0, 0)) then
+    begin EdSetMusicTrack('menu.ogg'); MusicChanged := True; end;
+    if ImGui.Selectable('gameover.ogg', CurMusic = 'gameover.ogg', ImGuiSelectableFlags_None, ImVec2.New(0, 0)) then
+    begin EdSetMusicTrack('gameover.ogg'); MusicChanged := True; end;
+    ImGui.EndCombo();
+  end;
+  if MusicChanged then EditorDirty := True;
+  ImGui.PopItemWidth();
   ImGui.Separator();
   { Level metadata fields }
   ImGui.Text('-- Level Metadata --');
@@ -2159,12 +2659,26 @@ begin
       SkyBrowserDirty := True;
     end;
 
-    { Apply the browsed sky type if changed }
+    { Apply button — commits browsed sky/bg to the level }
+    if (BrowseSkyType <> EdGetSkyType) or (BrowseBgType <> EdGetBackGrType) then
+    begin
+      if ImGui.Button('Apply', ImVec2.New(80, 0)) then
+      begin
+        EdSetSkyType(BrowseSkyType);
+        EdSetBackGrType(BrowseBgType);
+        NeedRerender := True;
+        EditorDirty := True;
+      end;
+      ImGui.SameLine(0, 8);
+      ImGui.TextColored(ImVec4.New(1.0, 0.9, 0.3, 1.0), '(unsaved change)');
+    end;
+
+    { Re-render preview when browser selection changed }
     if SkyBrowserDirty then
     begin
       EdBuildSkyPreviewForType(BrowseSkyType, BrowseBgType, EdGetHorizon, 0);
       SkyBrowserDirty := False;
-      NeedRerender := True;  { Re-render level viewport after palette restore }
+      NeedRerender := True;
     end;
   end
   else
@@ -2430,22 +2944,21 @@ begin
           case Event.key.keysym.sym of
             SDLK_z: DoUndo;
             SDLK_y: DoRedo;
+            SDLK_c: DoCopy;
+            SDLK_x: DoCut;
+            SDLK_v: DoPaste;
+            SDLK_f: DoFill;
             SDLK_s: begin
               SyncMetaBuffersToEdRender;
-              if EdSaveLevelJSON(SAVE_FILE_NAME) then
-                EditorDirty := False;
+              if (MainKeyMods and Integer(KMOD_SHIFT)) <> 0 then
+                OpenFileDialog(True, 'Save Level As', '', ExtractFileName(CurrentFilePath))
+              else if CurrentFilePath <> '' then begin
+                if EdSaveLevelJSON(CurrentFilePath) then begin
+                  EditorDirty := False; UpdateWindowTitle; end;
+              end else
+                OpenFileDialog(True, 'Save Level', '', 'level.json');
             end;
-            SDLK_o: begin
-              if EdLoadLevelJSON(SAVE_FILE_NAME) then
-              begin
-                NeedRerender := True;
-                BrowseSkyType := EdGetSkyType;
-                BrowseBgType := EdGetBackGrType;
-                SkyBrowserDirty := False;
-                ResetEditingState;
-                SyncMetaBuffersFromEdRender;
-              end;
-            end;
+            SDLK_o: OpenFileDialog(False, 'Open Level', '', '');
           end;
         end
         else
@@ -2456,13 +2969,19 @@ begin
             SDLK_3: begin ZoomLevel := 3; NeedRerender := True; end;
             SDLK_g: begin ShowGrid := not ShowGrid; end;
             SDLK_m: begin ShowMarkers := not ShowMarkers; end;
+            SDLK_DELETE: DoDeleteSelection;
             SDLK_ESCAPE: begin
-              { Escape deselects current tile }
-              SelectedTileIdx := -1;
-              SelectedEnemyIdx := -1;
-              SelectedCharCode := 0;
-              SelectedTileName := '';
-              SelectedIsEnemy := False;
+              if PastePreviewActive then
+                PastePreviewActive := False
+              else if SelectionActive then
+                ClearSelection
+              else begin
+                SelectedTileIdx := -1;
+                SelectedEnemyIdx := -1;
+                SelectedCharCode := 0;
+                SelectedTileName := '';
+                SelectedIsEnemy := False;
+              end;
             end;
             SDLK_LEFT: begin
               ScrollX := ScrollX - 20;

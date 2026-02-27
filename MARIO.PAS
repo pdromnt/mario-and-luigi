@@ -1611,6 +1611,11 @@ program Mario;
           NewData;
           Data.NumPlayers := 1;
           CurPlayer := plMario;
+          { Play custom music track if specified }
+          if CustomMusicA <> '' then
+            PlayMusicByName(CustomMusicA)
+          else
+            PlayLevelMusic(1);  { Default to level 1 music }
           Passed := PlayWorld('x', 'C',
             CustomMapA, CustomOptA, CustomOptA,
             CustomMapB, CustomOptB, CustomOptB,
@@ -1725,6 +1730,11 @@ begin  { Mario }
         NewData;
         Data.NumPlayers := 1;
         CurPlayer := plMario;
+        { Play custom music track if specified }
+        if CustomMusicA <> '' then
+          PlayMusicByName(CustomMusicA)
+        else
+          PlayLevelMusic(1);  { Default to level 1 music }
         Passed := PlayWorld('x', 'C',
           CustomMapA, CustomOptA, CustomOptA,
           CustomMapB, CustomOptB, CustomOptB,

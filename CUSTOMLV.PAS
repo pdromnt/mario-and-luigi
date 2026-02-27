@@ -26,8 +26,10 @@ var
   { Map and options for PlayWorld -- sub-level A and B }
   CustomMapA: MapBuffer;
   CustomOptA: WorldOptions;
+  CustomMusicA: ShortString;
   CustomMapB: MapBuffer;
   CustomOptB: WorldOptions;
+  CustomMusicB: ShortString;
 
 procedure ScanCustomLevels;
 function LoadCustomLevel(Index: Integer): Boolean;
@@ -286,10 +288,27 @@ begin
   FindObjEnd := Len;
 end;
 
+{ Get a JSON key's string value within a bounded range }
+function GetStrInRange(Buf: PCharBuf; const Key: ShortString;
+  StartPos, EndPos: LongInt; const Default: ShortString): ShortString;
+var
+  P: LongInt;
+  V: ShortString;
+begin
+  P := FindKeyInRange(Buf, Key, StartPos, EndPos);
+  if P < 0 then
+  begin
+    GetStrInRange := Default;
+    Exit;
+  end;
+  ReadStr(Buf, P, EndPos, V);
+  GetStrInRange := V;
+end;
+
 { Parse a single sub-level's data from a bounded JSON object region
   [ObjStart..ObjEnd) into the given Map and Opt. }
 procedure ParseSubLevel(Buf: PCharBuf; ObjStart, ObjEnd: LongInt;
-  var Map: MapBuffer; var Opt: WorldOptions);
+  var Map: MapBuffer; var Opt: WorldOptions; var MusicStr: ShortString);
 var
   XSz, Row: Integer;
   P: LongInt;
@@ -323,6 +342,8 @@ begin
     InitX := GetIntInRange(Buf, 'startX', ObjStart, ObjEnd, 2);
     InitY := GetIntInRange(Buf, 'startY', ObjStart, ObjEnd, 10);
   end;
+
+  MusicStr := GetStrInRange(Buf, 'musicTrack', ObjStart, ObjEnd, '');
 
   XSz := GetIntInRange(Buf, 'width', ObjStart, ObjEnd, 236);
   if (XSz < 1) or (XSz > MaxWorldSize) then XSz := 236;
@@ -417,7 +438,7 @@ begin
         begin
           ObjStart := P;
           ObjEnd := FindObjEnd(Buf, P, BufLen);
-          ParseSubLevel(Buf, ObjStart, ObjEnd, CustomMapA, CustomOptA);
+          ParseSubLevel(Buf, ObjStart, ObjEnd, CustomMapA, CustomOptA, CustomMusicA);
           FoundSubs := 1;
           P := ObjEnd;
 
@@ -431,7 +452,7 @@ begin
           begin
             ObjStart := P;
             ObjEnd := FindObjEnd(Buf, P, BufLen);
-            ParseSubLevel(Buf, ObjStart, ObjEnd, CustomMapB, CustomOptB);
+            ParseSubLevel(Buf, ObjStart, ObjEnd, CustomMapB, CustomOptB, CustomMusicB);
             FoundSubs := 2;
           end;
         end;
@@ -443,6 +464,7 @@ begin
           begin
             CustomMapB := CustomMapA;
             CustomOptB := CustomOptA;
+            CustomMusicB := CustomMusicA;
           end;
           LoadFromBuffer := True;
           Exit;
@@ -452,9 +474,10 @@ begin
   end;
 
   { v1 format or fallback: flat keys, single sub-level }
-  ParseSubLevel(Buf, 0, BufLen, CustomMapA, CustomOptA);
+  ParseSubLevel(Buf, 0, BufLen, CustomMapA, CustomOptA, CustomMusicA);
   CustomMapB := CustomMapA;
   CustomOptB := CustomOptA;
+  CustomMusicB := CustomMusicA;
   LoadFromBuffer := True;
 end;
 

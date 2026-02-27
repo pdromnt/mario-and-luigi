@@ -17,6 +17,7 @@ interface
   procedure PauseBGMusic;
   procedure ResumeBGMusic;
 
+  procedure PlayMusicByName (const filename: string);
   procedure ApplyBGMVolume;
   procedure ResetCurrentTrack;
 
@@ -160,6 +161,12 @@ implementation
     Mix_CloseAudio;
     Mix_Quit;
     MixerReady := False;
+  end;
+
+  procedure PlayMusicByName (const filename: string);
+  begin
+    if filename = '' then Exit;
+    PlayTrack(filename, -1);
   end;
 
   procedure PlayMenuMusic;
