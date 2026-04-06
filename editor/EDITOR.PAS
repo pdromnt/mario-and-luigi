@@ -49,13 +49,9 @@ const
     'Items', 'Enemies', 'Deco', 'Platforms', 'Rewards'
   );
 
-  LevelNames: array[0..11] of PAnsiChar = (
-    'Level 1-A', 'Level 1-B',
-    'Level 2-A', 'Level 2-B',
-    'Level 3-A', 'Level 3-B',
-    'Level 4-A', 'Level 4-B',
-    'Level 5-A', 'Level 5-B',
-    'Level 6-A', 'Level 6-B'
+  LevelNames: array[0..5] of PAnsiChar = (
+    'Level 1', 'Level 2', 'Level 3',
+    'Level 4', 'Level 5', 'Level 6'
   );
 
 var
@@ -73,7 +69,7 @@ var
 
   { Editor state }
   ShowDemoWindow: Boolean = False;
-  CurrentLevel: Integer = 0;  { 0..11: index into LevelNames }
+  CurrentLevel: Integer = 0;  { 0..5: world index into LevelNames }
   ScrollX: Integer = 0;
   ZoomLevel: Integer = 2;     { 1x, 2x, 3x }
   NeedRerender: Boolean = True;
@@ -332,16 +328,8 @@ begin
 end;
 
 procedure LoadSelectedLevel;
-var
-  WorldIdx: Integer;
-  Sub: Char;
 begin
-  WorldIdx := CurrentLevel div 2;
-  if (CurrentLevel mod 2) = 0 then
-    Sub := 'A'
-  else
-    Sub := 'B';
-  EdLoadLevel(WorldIdx, Sub);
+  EdLoadLevel(CurrentLevel, 'A');
   ScrollX := 0;
   NeedRerender := True;
   { Sync sky browser to the loaded level's settings }
@@ -1015,7 +1003,7 @@ begin
     begin
       if ImGui.BeginMenu('Open Built-In', True) then
       begin
-        for i := 0 to 11 do
+        for i := 0 to 5 do
         begin
           if ImGui.MenuItem(LevelNames[i], nil, i = CurrentLevel, True) then
           begin
