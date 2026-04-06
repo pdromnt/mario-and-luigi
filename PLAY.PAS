@@ -302,12 +302,6 @@ implementation
                 PlayMacro;
                 EndPause := TRUE;
               end;
-              if Cheat = kb2+kb0+kb8+kbD then   { 208D - Save demo (file: $.) }
-              begin
-                SaveMacro;
-                EndPause := TRUE;
-              end;
-
               if Cheat = kb1+kbU+kbP then   { 1UP }
               begin
               { AddLife; }

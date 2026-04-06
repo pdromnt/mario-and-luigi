@@ -1126,7 +1126,7 @@ begin
   end;
   if ImGui.BeginPopupModal('About##popup', nil, ImGuiWindowFlags_AlwaysAutoResize) then
   begin
-    ImGui.Text('Mario & Luigi Level Editor');
+    ImGui.Text('Leaper - Level Editor');
     ImGui.Separator();
     ImGui.Text(AnsiString('Build: ' + BUILD_DATE + '-' + BUILD_TIME));
     ImGui.Text('Engine: SDL2 + OpenGL3 + Dear ImGui');

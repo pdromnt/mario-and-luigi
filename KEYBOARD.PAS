@@ -43,7 +43,6 @@ interface
 
   procedure RecordMacro;
   procedure PlayMacro;
-  procedure SaveMacro;
   procedure StopMacro;
   function PlayingMacro: Boolean;
 
@@ -340,20 +339,6 @@ implementation
     PlaybackJustEnded := FALSE;
   end;
 
-  procedure SaveMacro;
-  var
-    F: File of KeySeq;
-    i: Integer;
-  begin
-    Assign(F, '$');
-    ReWrite(F);
-    for i := 1 to MaxKeys do
-      Write(F, Sequence[i]);
-    Close(F);
-    Recording := FALSE;
-    FillChar(SeqPos, SizeOf(SeqPos), 0);
-  end;
-
   procedure SaveMacroToFile(const FileName: string; var Hdr: DemoHeader);
   var
     F: File;
@@ -417,24 +402,11 @@ implementation
   function NextDemoName: string;
   var
     F: File;
-    i, p: Integer;
-    Name, FullPath, SaveDir, S: string;
-    Len: Byte absolute S;
+    i: Integer;
+    Name, FullPath, SaveDir: string;
   begin
     NextDemoName := '';
-    { Get savedata directory — same logic as MARIO.PAS GetUserDataDir }
-    S := ParamStr(0);
-    p := Len;
-    while (p > 0) and (S[p] <> '\') and (S[p] <> '/') do Dec(p);
-    if p > 0 then
-      SaveDir := Copy(S, 1, p)
-    else
-      SaveDir := '';
-    SaveDir := SaveDir + 'savedata' + DirectorySeparator;
-    {$I-}
-    MkDir(SaveDir);
-    if IOResult <> 0 then ;
-    {$I+}
+    SaveDir := AssetPaths.GetSaveDataDir;
     for i := 1 to 9 do
     begin
       Name := 'REPLAY' + Chr(i + Ord('0')) + '.RPL';

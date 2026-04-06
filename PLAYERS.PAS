@@ -6,6 +6,7 @@ interface
     TmpObj,
     Blocks,
     Buffers,
+    TileDefs,
     Figures,
     Glitter,
     Enemies,

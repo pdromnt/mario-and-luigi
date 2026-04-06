@@ -14,7 +14,7 @@ if not exist "%FPC%" (
 )
 
 set FPC_OPTS=-Mtp -Ci- -Cr- -Sg -Si -O2
-set UNIT_PATH=-FuSDL2-for-Pascal -Fu. -Fushared
+set UNIT_PATH=-FuSDL2-for-Pascal -Fu. -Fushared -Fusrc
 
 REM Prepare output directory
 if not exist OUT mkdir OUT

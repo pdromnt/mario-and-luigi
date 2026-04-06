@@ -29,7 +29,7 @@ REM Unit search paths:
 REM   OUT first so fresh editor PPU/O files take priority over stale game builds in ..\OUT
 REM   ImGui-Pascal src, impl, OpenGL3, SDL2 bindings
 REM   Parent dir (..) for game units: VGA256, Buffers, Figures, BackGr, Worlds, Palettes, etc.
-set UNIT_PATH=-FuOUT -Fu%IMGUI%\src -Fu%IMGUI%\impl -Fu%IMGUI%\OpenGL3 -Fu%IMGUI%\SDL2-for-Pascal\units -Fu.. -Fu..\shared
+set UNIT_PATH=-FuOUT -Fu%IMGUI%\src -Fu%IMGUI%\impl -Fu%IMGUI%\OpenGL3 -Fu%IMGUI%\SDL2-for-Pascal\units -Fu.. -Fu..\shared -Fu..\src
 set INC_PATH=-Fi%IMGUI%\src -Fi%IMGUI%\SDL2-for-Pascal\units -Fi..
 
 REM Library search path (for dynamic linking)

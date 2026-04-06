@@ -11,6 +11,7 @@ interface
 
   uses
     Buffers,
+    TileDefs,
     Palettes,
     VGA256,
     BackGr,
@@ -76,42 +77,10 @@ interface
     wood colors, and wall styles in a single level without relying on
     Options.PipeColor / Options.BrickColor / etc. }
 
-  const
-    { Color byte values used by ReColor }
-    PIPE_COLORS: array[0..5] of Byte = ($18, $30, $50, $70, $80, $B0);
-    BRICK_COLORS: array[0..3] of Byte = ($18, $30, $48, $B0);
-    XBLOCK_COLORS: array[0..3] of Byte = ($30, $68, $A0, $B0);
-    WOOD_COLORS: array[0..2] of Byte = ($18, $30, $48);
-
-    { Character code ranges for per-tile colored variants }
-    CPIPE_BASE   = 178;  { #178..#201: 6 colors x 4 shapes = 24 codes }
-    CBRICK_BASE  = 202;  { #202..#205: 4 brick colors }
-    CXBLOCK_BASE = 206;  { #206..#209: 4 xblock colors }
-    CWOOD_BASE   = 210;  { #210..#212: 3 wood colors }
-    CBREAK_BASE  = 213;  { #213..#216: 4 breakable block colors }
-
-    { Full ground wall variant codes: 5 styles x 9 variants = 45 codes
-      Each style has: TL(0), Top(1), TR(2), Left(3), Body(4), Right(5), BL(6), Bot(7), BR(8) }
-    CWALL_GREEN  = 91;   { #91..#99:   Green wall variants }
-    CWALL_SAND   = 100;  { #100..#108: Sand wall variants }
-    CWALL_BROWN  = 109;  { #109..#117: Brown wall variants }
-    CWALL_GRASS  = 118;  { #118..#126: Grass wall variants }
-    CWALL_DESERT = 139;  { #139..#147: Desert wall variants }
-    WALL_VARIANTS = 9;   { TL, Top, TR, Left, Body, Right, BL, Bottom, BR }
-
-    WALL_STYLE_BASES: array[0..4] of Byte = (
-      CWALL_GREEN, CWALL_SAND, CWALL_BROWN, CWALL_GRASS, CWALL_DESERT
-    );
-
-    { Design-independent deco tile codes (#148..#154)
-      These allow placing any deco variant regardless of level Design. }
-    CDECO_TREE_HASH  = 148;  { Tree trunk (was '#' Design 2) }
-    CDECO_TREE_PCT   = 149;  { Tree leaves (was '%' Design 2) }
-    CDECO_WIN_HASH   = 150;  { Window (was '#' Design 3) }
-    CDECO_WIN_PCT    = 151;  { Window (was '%' Design 3) }
-    CDECO_LAVA_HASH  = 152;  { Lava (was '#' Design 4) }
-    CDECO_LAVA_PCT   = 153;  { Lava (was '%' Design 4) }
-    CDECO_SMTREE     = 154;  { Small Tree (was #240 Design 2) }
+  { Per-tile color constants (PIPE_COLORS, BRICK_COLORS, XBLOCK_COLORS,
+    WOOD_COLORS, CPIPE_BASE, CBRICK_BASE, CXBLOCK_BASE, CWOOD_BASE,
+    CBREAK_BASE, CWALL_*, WALL_VARIANTS, WALL_STYLE_BASES, CDECO_*)
+    are defined in TileDefs and re-exported via the uses clause above. }
 
   var
     { Pre-colored pipe sprites: [color_idx 0..5, shape 0..3] }
