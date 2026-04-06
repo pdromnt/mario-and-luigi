@@ -16,6 +16,7 @@ interface
     Stars,
     Status,
     Txt,
+    Audio,
     Music,
     BGMusic,
     CustomLv,
@@ -818,17 +819,17 @@ implementation
         end;
         if Key = #16 then  { Q - quiet/sound }
         begin
-          if BeeperSound or Buffers.BGMEnabled then
+          if BeeperSound or Audio.BGMEnabled then
           begin
             BeeperOff;
-            Buffers.BGMEnabled := FALSE;
+            Audio.BGMEnabled := FALSE;
             PauseBGMusic;
           end
           else
           begin
             BeeperOn;
             Beep (80);
-            Buffers.BGMEnabled := TRUE;
+            Audio.BGMEnabled := TRUE;
             ResumeBGMusic;
           end;
           Key := #255;

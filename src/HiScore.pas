@@ -40,7 +40,7 @@ implementation
 
   function GetHiScoreName: string;
   begin
-    GetHiScoreName := GetUserDataDir + 'MARIO.HIS';
+    GetHiScoreName := GetUserDataDir + 'GAME.HIS';
   end;
 
   procedure SetInitials(var E: HiScoreEntry; C1, C2, C3: Char);

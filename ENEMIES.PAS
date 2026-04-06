@@ -8,6 +8,7 @@ interface
     VGA256,
     Glitter,
     TmpObj,
+    Audio,
     Music,
     SpriteLoader,
     AssetPaths;

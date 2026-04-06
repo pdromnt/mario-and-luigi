@@ -8,7 +8,7 @@ unit Config;
 interface
 
   uses
-    Buffers, Play, Keyboard, Joystick, AssetPaths, BGMusic, sdl2;
+    Buffers, Audio, Play, Keyboard, Joystick, AssetPaths, BGMusic, sdl2;
 
   const
     MAX_SAVE = 3;
@@ -82,12 +82,12 @@ implementation
 
   function GetConfigName: string;
   begin
-    GetConfigName := GetUserDataDir + 'MARIO.CFG';
+    GetConfigName := GetUserDataDir + 'GAME.CFG';
   end;
 
   function GetSaveName: string;
   begin
-    GetSaveName := GetUserDataDir + 'MARIO.SAV';
+    GetSaveName := GetUserDataDir + 'GAME.SAV';
   end;
 
   function GetKeyNameStr(kc: LongInt): string;
@@ -126,16 +126,16 @@ implementation
   begin
     with Data do
     begin
-      Lives [plMario] := 3;
-      Lives [plLuigi] := 3;
-      Coins [plMario] := 0;
-      Coins [plLuigi] := 0;
-      Score [plMario] := 0;
-      Score [plLuigi] := 0;
-      Progress [plMario] := 0;
-      Progress [plLuigi] := 0;
-      Mode [plMario] := mdSmall;
-      Mode [plLuigi] := mdSmall;
+      Lives [plPlayer1] := 3;
+      Lives [plPlayer2] := 3;
+      Coins [plPlayer1] := 0;
+      Coins [plPlayer2] := 0;
+      Score [plPlayer1] := 0;
+      Score [plPlayer2] := 0;
+      Progress [plPlayer1] := 0;
+      Progress [plPlayer2] := 0;
+      Mode [plPlayer1] := mdSmall;
+      Mode [plPlayer2] := mdSmall;
     end;
   end;
 
@@ -198,7 +198,7 @@ implementation
     { Consume any stale IOResult }
     IOResult;
 
-    { Read settings (MARIO.CFG) using untyped file for backward compat }
+    { Read settings (GAME.CFG) using untyped file for backward compat }
     Assign (UF, GetConfigName);
     Reset (UF, 1);
     if IOResult = 0 then
@@ -218,7 +218,7 @@ implementation
     { Consume any stale IOResult before next file }
     IOResult;
 
-    { Read save games (MARIO.SAV) }
+    { Read save games (GAME.SAV) }
     Assign (FS, GetSaveName);
     Reset (FS);
     if IOResult = 0 then
@@ -279,11 +279,11 @@ implementation
     with Settings do
     begin
       Play.Stat := SLine;
-      Buffers.BeeperSound := Sound;
-      Buffers.BGMEnabled := BGMOn;
-      Buffers.BGMVolume := BGMVol;
-      Buffers.SFXVolume := SFXVol;
-      Buffers.ApplySFXVolume;
+      Audio.BeeperSound := Sound;
+      Audio.BGMEnabled := BGMOn;
+      Audio.BGMVolume := BGMVol;
+      Audio.SFXVolume := SFXVol;
+      Audio.ApplySFXVolume;
     end;
 
     ApplyKeyBindings;
@@ -298,10 +298,10 @@ implementation
     with Settings do
     begin
       SLine := Play.Stat;
-      Sound := Buffers.BeeperSound;
-      BGMOn := Buffers.BGMEnabled;
-      BGMVol := Buffers.BGMVolume;
-      SFXVol := Buffers.SFXVolume;
+      Sound := Audio.BeeperSound;
+      BGMOn := Audio.BGMEnabled;
+      BGMVol := Audio.BGMVolume;
+      SFXVol := Audio.SFXVolume;
     end;
     { Copy current key bindings from Keyboard unit to Settings for saving }
     Settings.KeyJump  := LongInt(Keyboard.BindJump);
@@ -320,7 +320,7 @@ implementation
     { Consume any stale IOResult before file operations }
     IOResult;
 
-    { Write settings (MARIO.CFG) }
+    { Write settings (GAME.CFG) }
     Assign (FC, GetConfigName);
     ReWrite (FC);
     if IOResult = 0 then
@@ -333,7 +333,7 @@ implementation
     { Consume any stale IOResult before next file }
     IOResult;
 
-    { Write save games (MARIO.SAV) }
+    { Write save games (GAME.SAV) }
     Assign (FS, GetSaveName);
     ReWrite (FS);
     if IOResult = 0 then

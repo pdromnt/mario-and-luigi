@@ -8,11 +8,11 @@ unit Menus;
 interface
 
   uses
-    Play, Buffers, VGA256, Figures, Palettes, BackGr, Keyboard, Joystick,
+    Play, Buffers, Audio, VGA256, Figures, Palettes, BackGr, Keyboard, Joystick,
     Txt, Music, BGMusic, CustomLv, Enemies, Worlds, Config, HiScore,
     Demo, AssetPaths, SpriteLoader, TmpObj, Players, sdl2;
 
-  procedure LoadMarioSprites;
+  procedure LoadMenuSprites;
   procedure ShowHiScoreTable(AutoDismiss: Boolean);
   procedure EnterHiScoreInitials(PlayerScore: LongInt; PlayerIdx: Byte);
   procedure ShowPlayerName(Player: Byte);
@@ -32,7 +32,7 @@ implementation
     Start000: array[0..1507] of Byte;    { 116x13 }
     Start001: array[0..1403] of Byte;    { 108x13 }
 
-  procedure LoadMarioSprites;
+  procedure LoadMenuSprites;
   var
     Spr: TSpriteData;
 
@@ -263,12 +263,12 @@ implementation
     for i := 0 to MAX_PAGE do
     begin
       case Player of
-        plMario:
+        plPlayer1:
           begin
             iW := 116;
             DrawImage (160 - iW div 2, 85 - iH div 2, iW, iH, Start000);
           end;
-        plLuigi:
+        plPlayer2:
           begin
             iW := 108;
             DrawImage (160 - iW div 2, 85 - iH div 2, iW, iH, Start001);
@@ -399,7 +399,7 @@ implementation
       NewData;
 
       PlayWorld (#0, #0, IntroLevel.Map, IntroLevel.Options, IntroLevel.Options,
-        IntroLevel.Map, IntroLevel.Options, IntroLevel.Options, plMario);
+        IntroLevel.Map, IntroLevel.Options, IntroLevel.Options, plPlayer1);
       InitBackGr (3, 0);
 
       OutPalette ($A0, 35, 45, 50);
@@ -513,7 +513,7 @@ implementation
               end;
             ST_SOUND:
               begin
-                 if Buffers.BGMEnabled then
+                 if Audio.BGMEnabled then
                    Menu[1] := 'BGM ON '
                  else
                    Menu[1] := 'BGM OFF';
@@ -521,9 +521,9 @@ implementation
                    Menu[2] := 'SFX ON '
                  else
                    Menu[2] := 'SFX OFF';
-                 Str(Buffers.BGMVolume, VolStr);
+                 Str(Audio.BGMVolume, VolStr);
                  Menu[3] := 'BGM VOLUME '#7' ' + VolStr;
-                 Str(Buffers.SFXVolume, VolStr);
+                 Str(Audio.SFXVolume, VolStr);
                  Menu[4] := 'SFX VOLUME '#7' ' + VolStr;
                  Menu[5] := 'BACK';
                  Menu[6] := '';
@@ -638,18 +638,18 @@ implementation
                  Menu[7] := '';
                  for i := 1 to 3 do
                    with Saves.Games[i - 1] do
-                     if (Progress[plMario] = 0) and (Progress[plLuigi] = 0) then
+                     if (Progress[plPlayer1] = 0) and (Progress[plPlayer2] = 0) then
                        Menu[i] := Menu[i] + 'EMPTY'
                      else
                      begin
-                       j := Progress[plMario];
+                       j := Progress[plPlayer1];
                        k := Byte (Progress [CurPlayer] >= NUM_LEV);
                        if k > 0 then
                          Dec (j, NUM_LEV);
-                       if Progress[plLuigi] > j then
+                       if Progress[plPlayer2] > j then
                        begin
-                         j := Progress[plLuigi];
-                         Progress[plMario] := j;
+                         j := Progress[plPlayer2];
+                         Progress[plPlayer1] := j;
                        end;
                        Menu[i] := Menu[i] +
                          'LEVEL ' + Chr (j + Ord ('0') + 1) + ' ';
@@ -770,14 +770,14 @@ implementation
               if Status = ST_SOUND then
               begin
                 case Selected of
-                  3: if Buffers.BGMVolume > 0 then
+                  3: if Audio.BGMVolume > 0 then
                      begin
-                       Dec(Buffers.BGMVolume);
+                       Dec(Audio.BGMVolume);
                        ApplyBGMVolume;
                      end;
-                  4: if Buffers.SFXVolume > 0 then
+                  4: if Audio.SFXVolume > 0 then
                      begin
-                       Dec(Buffers.SFXVolume);
+                       Dec(Audio.SFXVolume);
                        ApplySFXVolume;
                      end;
                 end;
@@ -786,14 +786,14 @@ implementation
               if Status = ST_SOUND then
               begin
                 case Selected of
-                  3: if Buffers.BGMVolume < 10 then
+                  3: if Audio.BGMVolume < 10 then
                      begin
-                       Inc(Buffers.BGMVolume);
+                       Inc(Audio.BGMVolume);
                        ApplyBGMVolume;
                      end;
-                  4: if Buffers.SFXVolume < 10 then
+                  4: if Audio.SFXVolume < 10 then
                      begin
-                       Inc(Buffers.SFXVolume);
+                       Inc(Audio.SFXVolume);
                        ApplySFXVolume;
                      end;
                 end;
@@ -906,8 +906,8 @@ implementation
                 ST_SOUND:
                   case Selected of
                     1: begin  { BGM ON/OFF }
-                         Buffers.BGMEnabled := not Buffers.BGMEnabled;
-                         if Buffers.BGMEnabled then
+                         Audio.BGMEnabled := not Audio.BGMEnabled;
+                         if Audio.BGMEnabled then
                          begin
                            ResetCurrentTrack;
                            PlayMenuMusic;
@@ -947,7 +947,7 @@ implementation
                     GameNumber := Selected - 1;
                     Saves.Games[GameNumber].NumPlayers := 1;
                     with Saves.Games[GameNumber] do
-                      if (Progress[plMario] = 0) and (Progress[plLuigi] = 0) then
+                      if (Progress[plPlayer1] = 0) and (Progress[plPlayer2] = 0) then
                         Status := ST_NUMPLAYERS
                       else
                       begin
@@ -1055,7 +1055,7 @@ implementation
           FadeDown(64);
           NewData;
           Data.NumPlayers := 1;
-          CurPlayer := plMario;
+          CurPlayer := plPlayer1;
           { Play custom music track if specified }
           if CustomMusicA <> '' then
             PlayMusicByName(CustomMusicA)

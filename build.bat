@@ -21,22 +21,22 @@ if not exist OUT mkdir OUT
 
 set OUTPUT=-FEOUT
 
-REM Compile icon resource (mario.res is also committed to the repo
+REM Compile icon resource (game.res is also committed to the repo
 REM as a fallback in case windres is not available)
-if exist resources\icon.ico if exist resources\mario.rc (
+if exist resources\icon.ico if exist resources\game.rc (
     echo Compiling icon resource...
-    "%WINDRES%" --preprocessor=cat -i resources\mario.rc -o resources\mario.res 2>nul
-    if exist resources\mario.res (
+    "%WINDRES%" --preprocessor=cat -i resources\game.rc -o resources\game.res 2>nul
+    if exist resources\game.res (
         echo Icon resource OK.
     ) else (
-        echo WARNING: windres not found, using pre-built resources\mario.res if available.
+        echo WARNING: windres not found, using pre-built resources\game.res if available.
     )
 )
 
 echo.
-echo Compiling Mario SDL2 port...
+echo Compiling game...
 echo.
-"%FPC%" %FPC_OPTS% %UNIT_PATH% %OUTPUT% MARIO.PAS
+"%FPC%" %FPC_OPTS% %UNIT_PATH% %OUTPUT% GAME.PAS
 if errorlevel 1 (
     echo.
     echo Compilation FAILED!
@@ -66,5 +66,5 @@ if exist assets (
 )
 
 echo Build complete! Output is in the OUT\ folder.
-echo Run OUT\MARIO.exe to play!
+echo Run OUT\GAME.exe to play!
 pause

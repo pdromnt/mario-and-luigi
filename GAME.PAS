@@ -1,12 +1,12 @@
-program Mario;
+program Game;
 
-  { Mario game for the PC by Mike Wiering, 1994-95 }
+  { Game for the PC by Mike Wiering, 1994-95 }
   { SDL2 port }
 
   {$A+} {$B-} {$G+} {$I-} {$R-} {$S+} {$V-} {$X+}
   {$IFDEF WINDOWS}
   {$APPTYPE GUI}
-  {$R resources\mario.res}
+  {$R resources\game.res}
   {$ENDIF}
 
   {$DEFINE MENU}
@@ -25,6 +25,7 @@ program Mario;
     Figures,
     Palettes,
     Txt,
+    Audio,
     Music,
     BGMusic,
     CustomLv,
@@ -90,10 +91,14 @@ program Mario;
       ExeDir := Copy(S, 1, p)
     else
       ExeDir := '';
+    { Clean up old files from legacy locations (before savedata/) }
     TryDelete(ExeDir + 'MARIO.CFG');
     TryDelete(ExeDir + 'MARIO.SAV');
     TryDelete(ExeDir + 'MARIO.HIS');
     TryDelete(ExeDir + 'MARIO.DEM');
+    TryDelete(ExeDir + 'GAME.CFG');
+    TryDelete(ExeDir + 'GAME.SAV');
+    TryDelete(ExeDir + 'GAME.HIS');
     TryDelete(ExeDir + 'debug.log');
     for i := 1 to 9 do
       TryDelete(ExeDir + 'REPLAY' + Chr(i + Ord('0')) + '.RPL');
@@ -110,14 +115,14 @@ program Mario;
     ShutdownBGMusic;
   end;
 
-begin  { Mario }
+begin  { Game }
   InitKeyBoard;
   InitWorlds;
   LoadFiguresSprites;
   LoadEnemySprites;
   LoadPlayerSprites;
   LoadTmpObjSprites;
-  LoadMarioSprites;
+  LoadMenuSprites;
   LoadBackGrData;
   LoadFontData;
   Data.NumPlayers := 1;
@@ -162,7 +167,7 @@ begin  { Mario }
       begin
         NewData;
         Data.NumPlayers := 1;
-        CurPlayer := plMario;
+        CurPlayer := plPlayer1;
         { Play custom music track if specified }
         if CustomMusicA <> '' then
           PlayMusicByName(CustomMusicA)
@@ -186,25 +191,25 @@ begin  { Mario }
     with Data do
     begin
       if NumPlayers = 2 then
-        if Progress [plMario] > Progress [plLuigi] then
-          Progress [plLuigi] := Progress [plMario]
+        if Progress [plPlayer1] > Progress [plPlayer2] then
+          Progress [plPlayer2] := Progress [plPlayer1]
         else
-          Progress [plMario] := Progress [plLuigi];
+          Progress [plPlayer1] := Progress [plPlayer2];
 
-      Lives [plMario] := 3;
-      Lives [plLuigi] := 3;
-      Coins [plMario] := 0;
-      Coins [plLuigi] := 0;
-      Score [plMario] := 0;
-      Score [plLuigi] := 0;
-      Mode [plMario] := mdSmall;
-      Mode [plLuigi] := mdSmall;
+      Lives [plPlayer1] := 3;
+      Lives [plPlayer2] := 3;
+      Coins [plPlayer1] := 0;
+      Coins [plPlayer2] := 0;
+      Score [plPlayer1] := 0;
+      Score [plPlayer2] := 0;
+      Mode [plPlayer1] := mdSmall;
+      Mode [plPlayer2] := mdSmall;
     end;
 
     repeat
       if Data.NumPlayers = 1 then
-        Data.Lives [plLuigi] := 0;
-      for CurPlayer := plMario to Data.NumPlayers - 1 do
+        Data.Lives [plPlayer2] := 0;
+      for CurPlayer := plPlayer1 to Data.NumPlayers - 1 do
       begin
         if not (EndGame or QuitGame) then
           if Data.Lives [CurPlayer] >= 1 then
@@ -242,16 +247,16 @@ begin  { Mario }
 
       end;
     until EndGame or QuitGame or
-      (Data.Lives [plMario] + Data.Lives [plLuigi] = 0);
+      (Data.Lives [plPlayer1] + Data.Lives [plPlayer2] = 0);
 
     { Hi-score check after Game Over (not on quit) }
     if (not QuitGame) and
-       (Data.Lives[plMario] + Data.Lives[plLuigi] = 0) then
+       (Data.Lives[plPlayer1] + Data.Lives[plPlayer2] = 0) then
     begin
-      if IsHiScore(Data.Score[plMario]) then
-        EnterHiScoreInitials(Data.Score[plMario], plMario);
-      if (Data.NumPlayers = 2) and IsHiScore(Data.Score[plLuigi]) then
-        EnterHiScoreInitials(Data.Score[plLuigi], plLuigi);
+      if IsHiScore(Data.Score[plPlayer1]) then
+        EnterHiScoreInitials(Data.Score[plPlayer1], plPlayer1);
+      if (Data.NumPlayers = 2) and IsHiScore(Data.Score[plPlayer2]) then
+        EnterHiScoreInitials(Data.Score[plPlayer2], plPlayer2);
     end;
 
     if GameNumber <> -1 then

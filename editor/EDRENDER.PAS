@@ -290,17 +290,17 @@ uses
   SpriteLoader, AssetPaths, LevelFormat;
 
 var
-  { Small Mario standing sprite — loaded from file to avoid pulling in Players unit.
+  { Small player standing sprite — loaded from file to avoid pulling in Players unit.
     Sprite faces left; we flip it horizontally when building the texture. }
-  SWMar000: array[0..559] of Byte;  { 20x28 }
+  SWPl1_000: array[0..559] of Byte;  { 20x28 }
 
-procedure LoadEdMarioSprite;
+procedure LoadEdPlayerSprite;
 var
   Spr: TSpriteData;
 begin
   LoadSprite(SpritePath('players/swmar000.sprite'), Spr);
-  if Length(Spr.Pixels) >= SizeOf(SWMar000) then
-    Move(Spr.Pixels[0], SWMar000, SizeOf(SWMar000));
+  if Length(Spr.Pixels) >= SizeOf(SWPl1_000) then
+    Move(Spr.Pixels[0], SWPl1_000, SizeOf(SWPl1_000));
 end;
 
 { --- Sub-Level Buffer Data --- }
@@ -628,8 +628,8 @@ begin
   LoadFiguresSprites;
   LoadEnemySprites;
 
-  { Load Mario sprite for player position marker }
-  LoadEdMarioSprite;
+  { Load player sprite for player position marker }
+  LoadEdPlayerSprite;
 
   { Load background data (palettes + terrain profiles) }
   LoadBackGrData;
@@ -1844,7 +1844,7 @@ begin
     begin
       SrcIdx := py * PLAYER_SPR_W + (PLAYER_SPR_W - 1 - px);  { flip horizontally }
       DstIdx := py * PLAYER_SPR_W + px;
-      c := Swmar000[SrcIdx];
+      c := SWPl1_000[SrcIdx];
       if c = 0 then
         PlayerSprBuf[DstIdx] := $00000000
       else
@@ -2397,7 +2397,7 @@ begin
   SavedActive := ActiveSubLevel;
 
   JSONWriteLn(F, '{');
-  JSONWriteLn(F, '  "format": "mario-luigi-level",');
+  JSONWriteLn(F, '  "format": "game-level",');
   JSONWriteLn(F, '  "version": 2,');
 
   { Root-level metadata from first sub-level }
@@ -2763,7 +2763,7 @@ begin
   if BytesRead <> FileSize then Exit;
 
   { Check for v3 format (single level, uses LevelFormat shared unit) }
-  if Pos('"mario-luigi-level"', Buf) = 0 then
+  if (Pos('"mario-luigi-level"', Buf) = 0) and (Pos('"game-level"', Buf) = 0) then
   begin
     Result := EdLoadLevelV3(FileName);
     Exit;

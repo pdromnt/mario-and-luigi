@@ -24,7 +24,7 @@ interface
 implementation
 
   uses
-    sdl2_mixer, Buffers;
+    sdl2_mixer, Audio;
 
   const
     FADE_DURATION = 1000;  { milliseconds for fade in/out }
@@ -56,7 +56,7 @@ implementation
     v128: Integer;
   begin
     if not MixerReady then Exit;
-    v128 := Buffers.BGMVolume * 13;  { 0->0, 10->130 }
+    v128 := Audio.BGMVolume * 13;  { 0->0, 10->130 }
     if v128 > 128 then v128 := 128;
     Mix_VolumeMusic(v128);
   end;
@@ -76,7 +76,7 @@ implementation
     if not MixerReady then Exit;
 
     { If BGM is disabled, don't play }
-    if not Buffers.BGMEnabled then Exit;
+    if not Audio.BGMEnabled then Exit;
 
     { Already playing this track? Don't restart }
     if filename = CurrentTrack then Exit;

@@ -8,6 +8,7 @@ interface
     Buffers,
     Glitter,
     Figures,
+    Audio,
     Music,
     SpriteLoader,
     AssetPaths;
@@ -40,15 +41,14 @@ interface
 
 implementation
 
+  { Unique sprites for TmpObj (Coin000, Quest000/001, Note000 come from Figures) }
   type
-    TStdSprite = array[0..279] of Byte;
     TSmallSprite = array[0..83] of Byte;  { Part000 is 12x7 }
+    TStdSprite = array[0..279] of Byte;
 
   var
     Part000: TSmallSprite;
-    Coin000, Quest000, Quest001: TStdSprite;
     WhHit000, WhFire000: TStdSprite;
-    Note000: TStdSprite;
 
   procedure LoadTmpSpr(const SubPath: string; var Dest; DestSize: Integer);
   var
@@ -62,12 +62,8 @@ implementation
   procedure LoadTmpObjSprites;
   begin
     LoadTmpSpr('effects/part000.sprite', Part000, SizeOf(Part000));
-    LoadTmpSpr('tiles/coin000.sprite', Coin000, SizeOf(Coin000));
-    LoadTmpSpr('tiles/quest000.sprite', Quest000, SizeOf(Quest000));
-    LoadTmpSpr('tiles/quest001.sprite', Quest001, SizeOf(Quest001));
     LoadTmpSpr('effects/whhit000.sprite', WhHit000, SizeOf(WhHit000));
     LoadTmpSpr('effects/whfire000.sprite', WhFire000, SizeOf(WhFire000));
-    LoadTmpSpr('tiles/note000.sprite', Note000, SizeOf(Note000));
   end;
 
   const

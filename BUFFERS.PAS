@@ -39,27 +39,25 @@ interface
     mdLarge       = 1;
     mdFire        = 2;
 
-    plMario = 0;
-    plLuigi = 1;
+    plPlayer1 = 0;
+    plPlayer2 = 1;
 
     QuitGame: Boolean = FALSE;
-    BeeperSound: Boolean = TRUE;
-    BGMEnabled: Boolean = TRUE;
 
   type
     {$A2}  { Word alignment (TP compatible) — needed for save game file compatibility }
     GameData = record
       NumPlayers: Integer;
-      Progress: array[plMario..plLuigi] of Integer;
-      Lives: array[plMario..plLuigi] of Integer;
-      Coins: array[plMario..plLuigi] of Integer;
-      Score: array[plMario..plLuigi] of LongInt;
-      Mode: array[plMario..plLuigi] of Byte;
+      Progress: array[plPlayer1..plPlayer2] of Integer;
+      Lives: array[plPlayer1..plPlayer2] of Integer;
+      Coins: array[plPlayer1..plPlayer2] of Integer;
+      Score: array[plPlayer1..plPlayer2] of LongInt;
+      Mode: array[plPlayer1..plPlayer2] of Byte;
     end;
     {$A+}  { Restore default alignment }
 
   const
-    PlayerName: array [plMario..plLuigi] of string [5] = ('MARIO', 'LUIGI');
+    PlayerName: array [plPlayer1..plPlayer2] of string [5] = ('MARIO', 'LUIGI');
 
   var
     Player: Byte;
@@ -77,7 +75,7 @@ interface
     PicBuffer = array [1 .. 2 * H, 1 .. W] of Char;
 
     PictureBufferPtr = ^PictureBuffer;
-    PictureBuffer = array [plMario .. plLuigi, mdSmall .. mdFire,
+    PictureBuffer = array [plPlayer1 .. plPlayer2, mdSmall .. mdFire,
       0 .. 3, dirLeft .. dirRight] of PicBuffer;
 
     { Types aliased from shared LevelFormat unit }
@@ -120,22 +118,6 @@ interface
 
   procedure ReadWorld (var Map; W: WorldBufferPtr; var Opt);
   procedure Swap;
-
-  { Shared audio state for SDL audio callback }
-  var
-    AudioFrequency: Integer;  { 0 = silence, >0 = freq in Hz }
-    BeepAge: Integer;         { Sound effect frame counter:
-                                0 = no active SFX beep,
-                                1 = fresh beep (don't overwrite yet),
-                                2+ = beep has been heard, can overwrite }
-    SFXVolume: Integer;       { 0-10, user setting for PC speaker volume }
-    BGMVolume: Integer;       { 0-10, user setting for BGM volume }
-    SFXAmplitude: Integer;    { Computed from SFXVolume: 0..4000 }
-
-  procedure BeeperOn;
-  procedure BeeperOff;
-  procedure Beep (Freq: Word);
-  procedure ApplySFXVolume;
 
   procedure InitLevelScore;
   procedure AddScore (N: LongInt);
@@ -211,35 +193,6 @@ implementation
       end;
   end;
 
-  procedure BeeperOn;
-  begin
-    BeeperSound := TRUE;
-    Beep(0);  { silence }
-  end;
-
-  procedure BeeperOff;
-  begin
-    BeeperSound := FALSE;
-    Beep(0);  { silence }
-  end;
-
-  procedure Beep (Freq: Word);
-  begin
-    if BeeperSound then
-    begin
-      AudioFrequency := Freq;
-      if Freq > 0 then
-        BeepAge := 1   { Mark as fresh — PlayMusic won't overwrite until next frame }
-      else
-        BeepAge := 0;
-    end
-    else
-    begin
-      AudioFrequency := 0;
-      BeepAge := 0;
-    end;
-  end;
-
   procedure InitLevelScore;
   begin
     LevelScore := 0;
@@ -250,17 +203,9 @@ implementation
     Inc(LevelScore, N);
   end;
 
-  procedure ApplySFXVolume;
-  begin
-    SFXAmplitude := SFXVolume * 400;  { 0->0, 10->4000 }
-  end;
-
 begin
   GetMem(WorldMap, SizeOf(WorldBuffer));
   GetMem(SaveWorldMap, SizeOf(WorldBuffer));
   GetMem(StarBackGr, SizeOf(StarBuffer));
   GetMem(Pictures, SizeOf(PictureBuffer));
-  SFXVolume := 10;
-  BGMVolume := 10;
-  ApplySFXVolume;
 end.

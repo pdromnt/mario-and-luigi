@@ -16,29 +16,22 @@ implementation
     Keyboard, Worlds, Buffers, Enemies, Config, AssetPaths;
 
   const
-    NUM_LEV = 6;  { Must match MARIO.PAS }
+    NUM_LEV = 6;  { Must match game constant }
 
   procedure PlayDemo;
   var
     Hdr: DemoHeader;
     DemoPath: string;
-    DemoLoaded: Boolean;
   begin
-    { Try MARIO.DEM (user override), then default.rpl (shipped asset) }
+    DemoPath := GetAssetsDir + 'demos' + DirectorySeparator + 'default.rpl';
     FillChar(Hdr, SizeOf(Hdr), 0);
-    DemoLoaded := LoadMacroFromFile(GetUserDataDir + 'MARIO.DEM', Hdr);
-    if not DemoLoaded then
-    begin
-      DemoPath := GetAssetsDir + 'demos' + DirectorySeparator + 'default.rpl';
-      DemoLoaded := LoadMacroFromFile(DemoPath, Hdr);
-    end;
-    if DemoLoaded then
+    if LoadMacroFromFile(DemoPath, Hdr) then
     begin
       NewData;
       Turbo := FALSE;
-      Data.Progress[plMario] := Hdr.Level;
+      Data.Progress[plPlayer1] := Hdr.Level;
       if Hdr.Level < NUM_LEV then
-        PlayWorldByIndex(' ', ' ', Hdr.Level, plMario);
+        PlayWorldByIndex(' ', ' ', Hdr.Level, plPlayer1);
     end;
     StopMacro;
   end;
@@ -52,15 +45,9 @@ implementation
     if not LoadMacroFromFile(GetUserDataDir + FileName, Hdr) then Exit;
     NewData;
     Turbo := FALSE;
-    Data.Progress[plMario] := Hdr.Level;
-    case Hdr.Level of
-      0: PlayWorldByIndex(' ', ' ', 0, plMario);
-      1: PlayWorldByIndex(' ', ' ', 1, plMario);
-      2: PlayWorldByIndex(' ', ' ', 2, plMario);
-      3: PlayWorldByIndex(' ', ' ', 3, plMario);
-      4: PlayWorldByIndex(' ', ' ', 4, plMario);
-      5: PlayWorldByIndex(' ', ' ', 5, plMario);
-    end;
+    Data.Progress[plPlayer1] := Hdr.Level;
+    if Hdr.Level < NUM_LEV then
+      PlayWorldByIndex(' ', ' ', Hdr.Level, plPlayer1);
     StopMacro;
   end;
 

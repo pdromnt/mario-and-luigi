@@ -26,8 +26,8 @@ const
   EY2 = 3;               { Extra rows below }
 
   { Player constants }
-  plMario = 0;
-  plLuigi = 1;
+  plPlayer1 = 0;
+  plPlayer2 = 1;
   dirLeft  = 0;
   dirRight = 1;
   mdSmall = 0;

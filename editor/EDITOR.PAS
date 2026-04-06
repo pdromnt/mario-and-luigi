@@ -1,6 +1,6 @@
 Program Editor;
 {
-  Mario & Luigi Level Editor
+  Leaper - Level Editor
   Uses Dear ImGui (via ImGui-Pascal) + SDL2 + OpenGL3
 
   This is the main program: sets up SDL2 window with OpenGL context,
@@ -659,9 +659,9 @@ var
   Title: AnsiString;
 begin
   if CurrentFilePath <> '' then
-    Title := 'Mario && Luigi Level Editor - ' + ExtractFileName(CurrentFilePath)
+    Title := 'Leaper - Level Editor - ' + ExtractFileName(CurrentFilePath)
   else
-    Title := 'Mario && Luigi Level Editor';
+    Title := 'Leaper - Level Editor';
   if EditorDirty then
     Title := '* ' + Title;
   SDL_SetWindowTitle(Window, PAnsiChar(Title));
@@ -1758,7 +1758,7 @@ begin
         end
         else if DraggingPlayerStart then
         begin
-          { Show semi-transparent Mario sprite at cursor during drag }
+          { Show semi-transparent player sprite at cursor during drag }
           if EdGetPlayerSpriteTexture <> 0 then
           begin
             SprUV0.x := 0; SprUV0.y := 0;
@@ -2349,7 +2349,7 @@ begin
       PlayerTX := EdGetPlayerStartX;
       PlayerTY := EdGetPlayerStartY;
 
-      { Position: bottom-align Mario sprite to tile bottom, center horizontally }
+      { Position: bottom-align player sprite to tile bottom, center horizontally }
       SprDispW := PLAYER_SPR_W * ZoomLevel;
       SprDispH := PLAYER_SPR_H * ZoomLevel;
       SprP1.x := ImgMin.x + (PlayerTX * EdGetTileW - ScrollX) * ZoomLevel
@@ -2832,7 +2832,7 @@ begin
 
   { Create window }
   Flags := SDL_WINDOW_OPENGL or SDL_WINDOW_RESIZABLE or SDL_WINDOW_ALLOW_HIGHDPI;
-  Window := SDL_CreateWindow('Mario & Luigi - Level Editor',
+  Window := SDL_CreateWindow('Leaper - Level Editor',
     SavedWinX, SavedWinY,
     SavedWinW, SavedWinH, Flags);
   if Window = nil then

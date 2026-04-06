@@ -28,13 +28,13 @@ jobs:
       - name: Compile
         shell: cmd
         run: |
-          ppcx64 -Mtp -Ci- -Cr- -Sg -Si -O2 -FuC:\fpc\units\x86_64-win64\* -FuSDL2-for-Pascal -Fu. -Fushared -FE. MARIO.PAS
+          ppcx64 -Mtp -Ci- -Cr- -Sg -Si -O2 -FuC:\fpc\units\x86_64-win64\* -FuSDL2-for-Pascal -Fu. -Fushared -Fusrc -FE. GAME.PAS
 
       - name: Package
         shell: bash
         run: |
           mkdir -p staging
-          cp MARIO.exe staging/
+          cp GAME.exe staging/
           cp SDL2.dll SDL2_mixer.dll staging/
           if ls music/*.ogg 1>/dev/null 2>&1; then
             mkdir -p staging/music
@@ -62,7 +62,7 @@ jobs:
 
       - name: Compile
         run: |
-          fpc -Mtp -Ci- -Cr- -Sg -Si -O2 -Fl$(brew --prefix)/lib -FuSDL2-for-Pascal -Fu. -Fushared -omario MARIO.PAS
+          fpc -Mtp -Ci- -Cr- -Sg -Si -O2 -Fl$(brew --prefix)/lib -FuSDL2-for-Pascal -Fu. -Fushared -Fusrc -ogame GAME.PAS
 
       - name: Create .app bundle
         run: |
@@ -75,7 +75,7 @@ jobs:
           mkdir -p "$APP/Contents/Frameworks"
 
           # Copy binary
-          cp mario "$APP/Contents/MacOS/mario"
+          cp game "$APP/Contents/MacOS/game"
 
           # Copy music into Resources (if present)
           cp music/*.ogg "$APP/Contents/Resources/music/" 2>/dev/null || true
@@ -206,12 +206,12 @@ jobs:
 
       - name: Compile
         run: |
-          fpc -Mtp -Ci- -Cr- -Sg -Si -O2 -FuSDL2-for-Pascal -Fu. -Fushared -omario MARIO.PAS
+          fpc -Mtp -Ci- -Cr- -Sg -Si -O2 -FuSDL2-for-Pascal -Fu. -Fushared -Fusrc -ogame GAME.PAS
 
       - name: Package
         run: |
           mkdir -p staging
-          cp mario staging/
+          cp game staging/
           if ls music/*.ogg 1>/dev/null 2>&1; then
             mkdir -p staging/music
             cp music/*.ogg staging/music/
@@ -253,12 +253,12 @@ jobs:
             apt-get update
             apt-get install -y fpc libsdl2-dev libsdl2-mixer-dev
           run: |
-            fpc -Mtp -Ci- -Cr- -Sg -Si -O2 -FuSDL2-for-Pascal -Fu. -Fushared -omario MARIO.PAS
+            fpc -Mtp -Ci- -Cr- -Sg -Si -O2 -FuSDL2-for-Pascal -Fu. -Fushared -Fusrc -ogame GAME.PAS
 
       - name: Package
         run: |
           mkdir -p staging
-          cp mario staging/
+          cp game staging/
           if ls music/*.ogg 1>/dev/null 2>&1; then
             mkdir -p staging/music
             cp music/*.ogg staging/music/

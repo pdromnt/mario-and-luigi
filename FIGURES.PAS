@@ -123,12 +123,17 @@ interface
     Call after palette initialization (NewPalette/SetSkyPalette). }
   procedure InitDecoSpritePalette;
 
-implementation
-
-  { -- Sprite data: loaded from .sprite asset files at runtime -- }
-
+  { Standard 20x14 tile sprite type — shared with other units }
   type
-    TSpriteArray = array[0..279] of Byte;  { Standard 20x14 tile sprite }
+    TSpriteArray = array[0..279] of Byte;
+
+  { Sprite data vars accessible to other units (e.g. TmpObj) }
+  var
+    Coin000: TSpriteArray;
+    Quest000, Quest001: TSpriteArray;
+    Note000: TSpriteArray;
+
+implementation
 
   var
     { Walls }
@@ -147,8 +152,6 @@ implementation
 
     { Blocks }
     Block000, Block001: TSpriteArray;
-    Quest000, Quest001: TSpriteArray;
-
     { Palms }
     WPalm000: TSpriteArray;
     Palm0000, Palm1000, Palm2000, Palm3000: TSpriteArray;
@@ -173,8 +176,6 @@ implementation
     { Items }
     Exit000, Exit001: TSpriteArray;
     Wood000: TSpriteArray;
-    Coin000: TSpriteArray;
-    Note000: TSpriteArray;
     XBlock000: TSpriteArray;
 
   { Helper: load a .sprite file into a 280-byte array }

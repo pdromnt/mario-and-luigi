@@ -89,7 +89,7 @@ begin
     {$IFDEF UNIX}
     Dir := GetEnvironmentVariable('HOME');
     if Dir <> '' then
-      Dir := IncludeTrailingPathDelimiter(Dir) + '.mario-luigi' + DirectorySeparator
+      Dir := IncludeTrailingPathDelimiter(Dir) + '.game-data' + DirectorySeparator
     else
       Dir := GetExeDir;
     {$ELSE}

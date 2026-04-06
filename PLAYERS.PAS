@@ -12,6 +12,7 @@ interface
     Enemies,
     BackGr,
     VGA256,
+    Audio,
     Music,
     Txt,
     KeyBoard,
@@ -63,14 +64,14 @@ implementation
     TPlayerSprite = array[0..559] of Byte;  { 20x28 = 560 bytes }
 
   var
-    { Mario sprites: S=small, L=large, F=fire, W=walk, J=jump }
-    SWMar000, SWMar001, SJMar000, SJMar001: TPlayerSprite;
-    LWMar000, LWMar001, LJMar000, LJMar001: TPlayerSprite;
-    FWMar000, FWMar001, FJMar000, FJMar001: TPlayerSprite;
-    { Luigi sprites }
-    SWLui000, SWLui001, SJLui000, SJLui001: TPlayerSprite;
-    LWLui000, LWLui001, LJLui000, LJLui001: TPlayerSprite;
-    FWLui000, FWLui001, FJLui000, FJLui001: TPlayerSprite;
+    { Player 1 sprites: S=small, L=large, F=fire, W=walk, J=jump }
+    SWPl1_000, SWPl1_001, SJPl1_000, SJPl1_001: TPlayerSprite;
+    LWPl1_000, LWPl1_001, LJPl1_000, LJPl1_001: TPlayerSprite;
+    FWPl1_000, FWPl1_001, FJPl1_000, FJPl1_001: TPlayerSprite;
+    { Player 2 sprites }
+    SWPl2_000, SWPl2_001, SJPl2_000, SJPl2_001: TPlayerSprite;
+    LWPl2_000, LWPl2_001, LJPl2_000, LJPl2_001: TPlayerSprite;
+    FWPl2_000, FWPl2_001, FJPl2_000, FJPl2_001: TPlayerSprite;
 
   procedure LoadPlSpr(const SubPath: string; var Dest: TPlayerSprite);
   var
@@ -83,30 +84,30 @@ implementation
 
   procedure LoadPlayerSprites;
   begin
-    LoadPlSpr('players/swmar000.sprite', SWMar000);
-    LoadPlSpr('players/swmar001.sprite', SWMar001);
-    LoadPlSpr('players/sjmar000.sprite', SJMar000);
-    LoadPlSpr('players/sjmar001.sprite', SJMar001);
-    LoadPlSpr('players/lwmar000.sprite', LWMar000);
-    LoadPlSpr('players/lwmar001.sprite', LWMar001);
-    LoadPlSpr('players/ljmar000.sprite', LJMar000);
-    LoadPlSpr('players/ljmar001.sprite', LJMar001);
-    LoadPlSpr('players/fwmar000.sprite', FWMar000);
-    LoadPlSpr('players/fwmar001.sprite', FWMar001);
-    LoadPlSpr('players/fjmar000.sprite', FJMar000);
-    LoadPlSpr('players/fjmar001.sprite', FJMar001);
-    LoadPlSpr('players/swlui000.sprite', SWLui000);
-    LoadPlSpr('players/swlui001.sprite', SWLui001);
-    LoadPlSpr('players/sjlui000.sprite', SJLui000);
-    LoadPlSpr('players/sjlui001.sprite', SJLui001);
-    LoadPlSpr('players/lwlui000.sprite', LWLui000);
-    LoadPlSpr('players/lwlui001.sprite', LWLui001);
-    LoadPlSpr('players/ljlui000.sprite', LJLui000);
-    LoadPlSpr('players/ljlui001.sprite', LJLui001);
-    LoadPlSpr('players/fwlui000.sprite', FWLui000);
-    LoadPlSpr('players/fwlui001.sprite', FWLui001);
-    LoadPlSpr('players/fjlui000.sprite', FJLui000);
-    LoadPlSpr('players/fjlui001.sprite', FJLui001);
+    LoadPlSpr('players/swmar000.sprite', SWPl1_000);
+    LoadPlSpr('players/swmar001.sprite', SWPl1_001);
+    LoadPlSpr('players/sjmar000.sprite', SJPl1_000);
+    LoadPlSpr('players/sjmar001.sprite', SJPl1_001);
+    LoadPlSpr('players/lwmar000.sprite', LWPl1_000);
+    LoadPlSpr('players/lwmar001.sprite', LWPl1_001);
+    LoadPlSpr('players/ljmar000.sprite', LJPl1_000);
+    LoadPlSpr('players/ljmar001.sprite', LJPl1_001);
+    LoadPlSpr('players/fwmar000.sprite', FWPl1_000);
+    LoadPlSpr('players/fwmar001.sprite', FWPl1_001);
+    LoadPlSpr('players/fjmar000.sprite', FJPl1_000);
+    LoadPlSpr('players/fjmar001.sprite', FJPl1_001);
+    LoadPlSpr('players/swlui000.sprite', SWPl2_000);
+    LoadPlSpr('players/swlui001.sprite', SWPl2_001);
+    LoadPlSpr('players/sjlui000.sprite', SJPl2_000);
+    LoadPlSpr('players/sjlui001.sprite', SJPl2_001);
+    LoadPlSpr('players/lwlui000.sprite', LWPl2_000);
+    LoadPlSpr('players/lwlui001.sprite', LWPl2_001);
+    LoadPlSpr('players/ljlui000.sprite', LJPl2_000);
+    LoadPlSpr('players/ljlui001.sprite', LJPl2_001);
+    LoadPlSpr('players/fwlui000.sprite', FWPl2_000);
+    LoadPlSpr('players/fwlui001.sprite', FWPl2_001);
+    LoadPlSpr('players/fjlui000.sprite', FJPl2_000);
+    LoadPlSpr('players/fjlui001.sprite', FJPl2_001);
   end;
 
   const
@@ -180,38 +181,38 @@ implementation
   begin
     FillChar (Pictures^, SizeOf (Pictures^), #$FF);
 
-    Move (SWMar000, Pictures^ [plMario, mdSmall, 0, dirLeft], SizeOf (PicBuffer));
-    Move (SWMar001, Pictures^ [plMario, mdSmall, 1, dirLeft], SizeOf (PicBuffer));
-    Move (SJMar000, Pictures^ [plMario, mdSmall, 2, dirLeft], SizeOf (PicBuffer));
-    Move (SJMar001, Pictures^ [plMario, mdSmall, 3, dirLeft], SizeOf (PicBuffer));
+    Move (SWPl1_000, Pictures^ [plPlayer1, mdSmall, 0, dirLeft], SizeOf (PicBuffer));
+    Move (SWPl1_001, Pictures^ [plPlayer1, mdSmall, 1, dirLeft], SizeOf (PicBuffer));
+    Move (SJPl1_000, Pictures^ [plPlayer1, mdSmall, 2, dirLeft], SizeOf (PicBuffer));
+    Move (SJPl1_001, Pictures^ [plPlayer1, mdSmall, 3, dirLeft], SizeOf (PicBuffer));
 
-    Move (LWMar000, Pictures^ [plMario, mdLarge, 0, dirLeft], SizeOf (PicBuffer));
-    Move (LWMar001, Pictures^ [plMario, mdLarge, 1, dirLeft], SizeOf (PicBuffer));
-    Move (LJMar000, Pictures^ [plMario, mdLarge, 2, dirLeft], SizeOf (PicBuffer));
-    Move (LJMar001, Pictures^ [plMario, mdLarge, 3, dirLeft], SizeOf (PicBuffer));
+    Move (LWPl1_000, Pictures^ [plPlayer1, mdLarge, 0, dirLeft], SizeOf (PicBuffer));
+    Move (LWPl1_001, Pictures^ [plPlayer1, mdLarge, 1, dirLeft], SizeOf (PicBuffer));
+    Move (LJPl1_000, Pictures^ [plPlayer1, mdLarge, 2, dirLeft], SizeOf (PicBuffer));
+    Move (LJPl1_001, Pictures^ [plPlayer1, mdLarge, 3, dirLeft], SizeOf (PicBuffer));
 
-    Move (FWMar000, Pictures^ [plMario, mdFire, 0, dirLeft], SizeOf (PicBuffer));
-    Move (FWMar001, Pictures^ [plMario, mdFire, 1, dirLeft], SizeOf (PicBuffer));
-    Move (FJMar000, Pictures^ [plMario, mdFire, 2, dirLeft], SizeOf (PicBuffer));
-    Move (FJMar001, Pictures^ [plMario, mdFire, 3, dirLeft], SizeOf (PicBuffer));
+    Move (FWPl1_000, Pictures^ [plPlayer1, mdFire, 0, dirLeft], SizeOf (PicBuffer));
+    Move (FWPl1_001, Pictures^ [plPlayer1, mdFire, 1, dirLeft], SizeOf (PicBuffer));
+    Move (FJPl1_000, Pictures^ [plPlayer1, mdFire, 2, dirLeft], SizeOf (PicBuffer));
+    Move (FJPl1_001, Pictures^ [plPlayer1, mdFire, 3, dirLeft], SizeOf (PicBuffer));
 
 
-    Move (SWLui000, Pictures^ [plLuigi, mdSmall, 0, dirLeft], SizeOf (PicBuffer));
-    Move (SWLui001, Pictures^ [plLuigi, mdSmall, 1, dirLeft], SizeOf (PicBuffer));
-    Move (SJLui000, Pictures^ [plLuigi, mdSmall, 2, dirLeft], SizeOf (PicBuffer));
-    Move (SJLui001, Pictures^ [plLuigi, mdSmall, 3, dirLeft], SizeOf (PicBuffer));
+    Move (SWPl2_000, Pictures^ [plPlayer2, mdSmall, 0, dirLeft], SizeOf (PicBuffer));
+    Move (SWPl2_001, Pictures^ [plPlayer2, mdSmall, 1, dirLeft], SizeOf (PicBuffer));
+    Move (SJPl2_000, Pictures^ [plPlayer2, mdSmall, 2, dirLeft], SizeOf (PicBuffer));
+    Move (SJPl2_001, Pictures^ [plPlayer2, mdSmall, 3, dirLeft], SizeOf (PicBuffer));
 
-    Move (LWLui000, Pictures^ [plLuigi, mdLarge, 0, dirLeft], SizeOf (PicBuffer));
-    Move (LWLui001, Pictures^ [plLuigi, mdLarge, 1, dirLeft], SizeOf (PicBuffer));
-    Move (LJLui000, Pictures^ [plLuigi, mdLarge, 2, dirLeft], SizeOf (PicBuffer));
-    Move (LJLui001, Pictures^ [plLuigi, mdLarge, 3, dirLeft], SizeOf (PicBuffer));
+    Move (LWPl2_000, Pictures^ [plPlayer2, mdLarge, 0, dirLeft], SizeOf (PicBuffer));
+    Move (LWPl2_001, Pictures^ [plPlayer2, mdLarge, 1, dirLeft], SizeOf (PicBuffer));
+    Move (LJPl2_000, Pictures^ [plPlayer2, mdLarge, 2, dirLeft], SizeOf (PicBuffer));
+    Move (LJPl2_001, Pictures^ [plPlayer2, mdLarge, 3, dirLeft], SizeOf (PicBuffer));
 
-    Move (FWLui000, Pictures^ [plLuigi, mdFire, 0, dirLeft], SizeOf (PicBuffer));
-    Move (FWLui001, Pictures^ [plLuigi, mdFire, 1, dirLeft], SizeOf (PicBuffer));
-    Move (FJLui000, Pictures^ [plLuigi, mdFire, 2, dirLeft], SizeOf (PicBuffer));
-    Move (FJLui001, Pictures^ [plLuigi, mdFire, 3, dirLeft], SizeOf (PicBuffer));
+    Move (FWPl2_000, Pictures^ [plPlayer2, mdFire, 0, dirLeft], SizeOf (PicBuffer));
+    Move (FWPl2_001, Pictures^ [plPlayer2, mdFire, 1, dirLeft], SizeOf (PicBuffer));
+    Move (FJPl2_000, Pictures^ [plPlayer2, mdFire, 2, dirLeft], SizeOf (PicBuffer));
+    Move (FJPl2_001, Pictures^ [plPlayer2, mdFire, 3, dirLeft], SizeOf (PicBuffer));
 
-    for Pl := plMario to plLuigi do
+    for Pl := plPlayer1 to plPlayer2 do
       for Md := mdSmall to mdFire do
         for N := 0 to 3 do
           HighMirror (@Pictures^ [Pl, Md, N, dirLeft], @Pictures^ [Pl, Md, N, dirRight]);
