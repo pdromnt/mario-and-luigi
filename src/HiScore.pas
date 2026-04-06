@@ -1,7 +1,7 @@
 unit HiScore;
 
 { Hi-score table management: read/write, insertion, default scores.
-  Extracted from MARIO.PAS. }
+  Extracted from GAME.PAS. }
 
 {$A+} {$B-} {$G+} {$I-} {$R-} {$S+} {$V-} {$X+}
 

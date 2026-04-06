@@ -1,7 +1,7 @@
 unit Config;
 
 { Configuration, save-game data, key bindings, and command-line parsing.
-  Extracted from MARIO.PAS. }
+  Extracted from GAME.PAS. }
 
 {$A+} {$B-} {$G+} {$I-} {$R-} {$S+} {$V-} {$X+}
 

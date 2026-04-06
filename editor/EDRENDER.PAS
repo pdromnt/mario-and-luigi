@@ -2762,8 +2762,11 @@ begin
   CloseFile(F);
   if BytesRead <> FileSize then Exit;
 
-  { Check for v3 format (single level, uses LevelFormat shared unit) }
-  if (Pos('"mario-luigi-level"', Buf) = 0) and (Pos('"game-level"', Buf) = 0) then
+  { Check version — v2 has "sublevels" array, v1 is flat format, v3 uses LevelFormat }
+  JSONVer := GetJSONInt(Buf, 'version', 1);
+
+  { v3: delegate to LevelFormat (canonical single-level format) }
+  if (JSONVer >= 3) or (FindKey(Buf, 'options', 1) > 0) then
   begin
     Result := EdLoadLevelV3(FileName);
     Exit;
@@ -2771,9 +2774,6 @@ begin
 
   { Free existing sub-level buffers }
   FreeAllSubLevels;
-
-  { Check version — v2 has "sublevels" array, v1 is flat format }
-  JSONVer := GetJSONInt(Buf, 'version', 1);
 
   if (JSONVer >= 2) and (FindKey(Buf, 'sublevels', 1) > 0) then
   begin

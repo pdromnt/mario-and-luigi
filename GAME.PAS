@@ -63,47 +63,6 @@ program Game;
     {$I+}
   end;
 
-  procedure CleanupOldFiles;
-  { Remove legacy files from old locations (before savedata/ was introduced) }
-  var
-    F: File;
-    ExeDir: string;
-    S: string;
-    Len: Byte absolute S;
-    p: Integer;
-
-    procedure TryDelete(const Path: string);
-    begin
-      Assign(F, Path);
-      {$I-}
-      Erase(F);
-      if IOResult <> 0 then ;
-      {$I+}
-    end;
-
-  var
-    i: Integer;
-  begin
-    S := ParamStr(0);
-    p := Len;
-    while (p > 0) and (S[p] <> '\') and (S[p] <> '/') do Dec(p);
-    if p > 0 then
-      ExeDir := Copy(S, 1, p)
-    else
-      ExeDir := '';
-    { Clean up old files from legacy locations (before savedata/) }
-    TryDelete(ExeDir + 'MARIO.CFG');
-    TryDelete(ExeDir + 'MARIO.SAV');
-    TryDelete(ExeDir + 'MARIO.HIS');
-    TryDelete(ExeDir + 'MARIO.DEM');
-    TryDelete(ExeDir + 'GAME.CFG');
-    TryDelete(ExeDir + 'GAME.SAV');
-    TryDelete(ExeDir + 'GAME.HIS');
-    TryDelete(ExeDir + 'debug.log');
-    for i := 1 to 9 do
-      TryDelete(ExeDir + 'REPLAY' + Chr(i + Ord('0')) + '.RPL');
-  end;
-
   var
     OldExitProc: Pointer;
 
@@ -131,7 +90,6 @@ begin  { Game }
   ReadCmdLine;
 
   { Clean up old files from pre-savedata locations }
-  CleanupOldFiles;
 
   jr := Settings.JSDat;
   jsEnabled := jsDetected and Settings.UseJS;

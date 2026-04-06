@@ -1,7 +1,7 @@
 unit Demo;
 
 { Demo playback: auto-demo and user replay files.
-  Extracted from MARIO.PAS. }
+  Extracted from GAME.PAS. }
 
 {$A+} {$B-} {$G+} {$I-} {$R-} {$S+} {$V-} {$X+}
 

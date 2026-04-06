@@ -10,10 +10,10 @@
 # Clanker files
 .claude/
 
-# Compiled Windows resources (but NOT mario.res — it's tracked so
+# Compiled Windows resources (but NOT game.res — it's tracked so
 # the build works without windres installed)
 *.res
-!mario.res
+!game.res
 
 # Avoid comitting songs for now
 *.ogg

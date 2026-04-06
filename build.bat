@@ -1,5 +1,5 @@
 @echo off
-REM Build Mario & Luigi SDL2 port with Free Pascal (64-bit)
+REM Build game with Free Pascal (64-bit)
 REM Output goes into OUT\ folder — ready to distribute or run.
 
 set FPC_DIR=C:\FPC\3.2.2\bin\i386-Win32

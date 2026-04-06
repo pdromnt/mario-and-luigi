@@ -1,7 +1,7 @@
 unit Menus;
 
 { Menu system: intro screen, hi-score display, initials entry, player name.
-  Extracted from MARIO.PAS. }
+  Extracted from GAME.PAS. }
 
 {$A+} {$B-} {$G+} {$I-} {$R-} {$S+} {$V-} {$X+}
 
@@ -22,7 +22,7 @@ implementation
 
   const
     WAIT_BEFORE_DEMO = 714;
-    NUM_LEV = 6;  { Must match MARIO.PAS }
+    NUM_LEV = 6;  { Must match GAME.PAS }
 
   var
     Block000: array[0..279] of Byte;     { 20x14 }

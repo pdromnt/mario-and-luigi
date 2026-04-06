@@ -1,6 +1,6 @@
 # Mario & Luigi Level Editor
 
-A visual level editor for Mario & Luigi, built with SDL2 + OpenGL3 + Dear ImGui.
+A visual level editor for the game, built with SDL2 + OpenGL3 + Dear ImGui.
 
 ## Building
 
@@ -147,7 +147,7 @@ The default save file is `level_edit.mled` in the editor's working directory.
 
 ## Visual Feedback
 
-- **Window title** shows `* Mario & Luigi Level Editor` when there are unsaved changes.
+- **Window title** shows `* ` when there are unsaved changes.
 - **Level Settings panel** shows a red "Unsaved changes" indicator.
 - **Unsaved changes dialog** appears when switching to a different built-in level with pending edits.
 - **Cursor preview** shows a ghost of the selected tile at the hover position in the viewport.

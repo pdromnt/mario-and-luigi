@@ -1,5 +1,5 @@
 @echo off
-REM Build Mario & Luigi Level Editor (64-bit)
+REM Build Leaper Level Editor (64-bit)
 REM Requires: FPC x86_64 cross-compiler (ppcrossx64)
 REM           + ImGui-Pascal in editor\ImGui-Pascal\
 
@@ -59,7 +59,7 @@ if exist resources\icon.ico if exist resources\editor.rc (
 )
 
 echo.
-echo Compiling Mario ^& Luigi Level Editor (64-bit)...
+echo Compiling Leaper Level Editor (64-bit)...
 echo.
 "%FPC%" %FPC_OPTS% %UNIT_PATH% %INC_PATH% %LIB_PATH% %OUTPUT% EDITOR.PAS
 if errorlevel 1 (

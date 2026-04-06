@@ -35,7 +35,7 @@ implementation
 
   const
     CheatsUsed: Integer = 0;
-    NUM_LEV = 6;  { Must match MARIO.PAS }
+    NUM_LEV = 6;  { Must match GAME.PAS }
 
   function PlayWorld (N1, N2: Char; var Map1; var Opt1; var Opt1b;
                       var Map2; var Opt2; var Opt2b; Player: Byte): Boolean;
@@ -554,7 +554,7 @@ implementation
       SwapPages;
 
       case Action of
-        1: begin  { Trigger Game Over — kill Mario properly }
+        1: begin  { Trigger Game Over — kill Player properly }
              Data.Lives[Player] := 1;
              Data.Mode[Player] := mdSmall;
              cdHit := 1;  { MovePlayer will start death demo }
@@ -1081,7 +1081,7 @@ implementation
       { Auto-end demo playback when sequence runs out }
       if WasPlayingMacro and (not PlayingMacro) then
       begin
-        ResetKeyBoard;  { Clear stale key states so Mario doesn't jump }
+        ResetKeyBoard;  { Clear stale key states so Player 1 doesn't jump }
         GameDone := TRUE;
         QuitGame := TRUE;
         StopBGMusic;

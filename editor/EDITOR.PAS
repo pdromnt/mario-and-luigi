@@ -668,7 +668,7 @@ begin
 end;
 
 {$IFDEF WINDOWS}
-{ Launch the game for test play — saves current level to temp file, runs MARIO.exe -T }
+{ Launch the game for test play — saves current level to temp file, runs GAME.exe -T }
 procedure LaunchTestPlay;
 var
   SI: STARTUPINFOA;
@@ -695,17 +695,17 @@ begin
 
   { Find game executable relative to editor location }
   { Editor is in sdl2_port/editor/OUT/EDITOR.exe }
-  { Game is in sdl2_port/OUT/MARIO.exe }
+  { Game is in sdl2_port/OUT/GAME.exe }
   EditorDir := ExtractFilePath(ParamStr(0));
-  GameExe := EditorDir + '..\OUT\MARIO.exe';
+  GameExe := EditorDir + '..\OUT\GAME.exe';
   if not FileExists(GameExe) then
-    GameExe := EditorDir + '..\..\OUT\MARIO.exe';
+    GameExe := EditorDir + '..\..\OUT\GAME.exe';
   if not FileExists(GameExe) then
-    GameExe := EditorDir + '..\MARIO.exe';
+    GameExe := EditorDir + '..\GAME.exe';
   if not FileExists(GameExe) then
   begin
     { Try current directory }
-    GameExe := 'MARIO.exe';
+    GameExe := 'GAME.exe';
     if not FileExists(GameExe) then Exit;
   end;
   GameExe := ExpandFileName(GameExe);
