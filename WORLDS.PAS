@@ -1,92 +1,83 @@
 unit Worlds;
 
-{  SDL2 port of world/level data  }
+{  World/level data - loads levels from JSON asset files at runtime  }
 {  Original (C) Copyright 1994-2001, Mike Wiering  }
-{  Data extracted from assembler db/dw blocks into typed constants  }
 
 interface
 
   uses
-    Buffers;
+    Buffers, LevelFormat, AssetPaths;
 
-  { Include the auto-generated typed constant arrays from worlds.inc }
-  {$I data\worlds.inc}
-
-  { Number of worlds (levels) in the game }
   const
     NUM_WORLDS = 6;
 
   type
-    PByteArray = ^TByteArray;
-    TByteArray = array[0..65534] of Byte;
-
     WorldEntry = record
-      LevelA:   PByteArray;
-      OptionsA: PByteArray;
-      OptA:     PByteArray;   { alternate options (turbo mode) }
-      LevelB:   PByteArray;
-      OptionsB: PByteArray;
+      LevelA:    TLevelData;
+      OptA:      WorldOptions;   { turbo mode options for level A }
+      LevelB:    TLevelData;
     end;
 
   var
     WorldList: array[0..NUM_WORLDS - 1] of WorldEntry;
-
-    { Intro data pointers (for title screen) }
-    IntroLevel:   PByteArray;
-    IntroOptions: PByteArray;
+    IntroLevel: TLevelData;
+    GameManifest: TManifest;
 
   procedure InitWorlds;
   procedure LoadWorld (N: Integer);
 
+  { PlayWorldByIndex: convenience wrapper that calls Play.PlayWorld with
+    the correct level data from WorldList. N is 0-based world index. }
+  function PlayWorldByIndex(N1, N2: Char; WorldIdx: Integer; Player: Byte): Boolean;
+
 implementation
 
+  uses
+    SysUtils, Play;
+
   procedure InitWorlds;
+  var
+    i: Integer;
+    LevDir: string;
   begin
-    { Intro / title screen }
-    IntroLevel   := @Intro_0_Data;
-    IntroOptions := @Options_0_Data;
+    LevDir := LevelPath('');
 
-    { World 1 (displayed as level "1") }
-    WorldList[0].LevelA   := @Level_1a_Data;
-    WorldList[0].OptionsA := @Options_1a_Data;
-    WorldList[0].OptA     := @Opt_1a_Data;
-    WorldList[0].LevelB   := @Level_1b_Data;
-    WorldList[0].OptionsB := @Options_1b_Data;
+    { Load manifest }
+    if not LoadManifest(ManifestPath, GameManifest) then
+    begin
+      WriteLn('ERROR: Could not load manifest.json from ', ManifestPath);
+      Halt(1);
+    end;
 
-    { World 2 (displayed as level "2") }
-    WorldList[1].LevelA   := @Level_2a_Data;
-    WorldList[1].OptionsA := @Options_2a_Data;
-    WorldList[1].OptA     := @Opt_2a_Data;
-    WorldList[1].LevelB   := @Level_2b_Data;
-    WorldList[1].OptionsB := @Options_2b_Data;
+    { Load intro level }
+    if not LoadLevelJSON(LevDir + GameManifest.IntroFile, IntroLevel) then
+    begin
+      WriteLn('ERROR: Could not load intro level');
+      Halt(1);
+    end;
 
-    { World 3 (displayed as level "3") }
-    WorldList[2].LevelA   := @Level_3a_Data;
-    WorldList[2].OptionsA := @Options_3a_Data;
-    WorldList[2].OptA     := @Opt_3a_Data;
-    WorldList[2].LevelB   := @Level_3b_Data;
-    WorldList[2].OptionsB := @Options_3b_Data;
+    { Load all world levels }
+    for i := 0 to High(GameManifest.Worlds) do
+    begin
+      if i >= NUM_WORLDS then Break;
 
-    { World 4 (displayed as level "4") - originally Level_5x in source }
-    WorldList[3].LevelA   := @Level_5a_Data;
-    WorldList[3].OptionsA := @Options_5a_Data;
-    WorldList[3].OptA     := @Opt_5a_Data;
-    WorldList[3].LevelB   := @Level_5b_Data;
-    WorldList[3].OptionsB := @Options_5b_Data;
+      if not LoadLevelJSON(LevDir + GameManifest.Worlds[i].LevelAFile, WorldList[i].LevelA) then
+      begin
+        WriteLn('ERROR: Could not load ', GameManifest.Worlds[i].LevelAFile);
+        Halt(1);
+      end;
 
-    { World 5 (displayed as level "5") - originally Level_6x in source }
-    WorldList[4].LevelA   := @Level_6a_Data;
-    WorldList[4].OptionsA := @Options_6a_Data;
-    WorldList[4].OptA     := @Opt_6a_Data;
-    WorldList[4].LevelB   := @Level_6b_Data;
-    WorldList[4].OptionsB := @Options_6b_Data;
+      if not LoadLevelJSON(LevDir + GameManifest.Worlds[i].LevelBFile, WorldList[i].LevelB) then
+      begin
+        WriteLn('ERROR: Could not load ', GameManifest.Worlds[i].LevelBFile);
+        Halt(1);
+      end;
 
-    { World 6 (displayed as level "6") - originally Level_4x in source }
-    WorldList[5].LevelA   := @Level_4a_Data;
-    WorldList[5].OptionsA := @Options_4a_Data;
-    WorldList[5].OptA     := @Opt_4a_Data;
-    WorldList[5].LevelB   := @Level_4b_Data;
-    WorldList[5].OptionsB := @Options_4b_Data;
+      { Compute turbo options for level A: start with normal options, apply overrides }
+      WorldList[i].OptA := WorldList[i].LevelA.Options;
+      if Length(GameManifest.Worlds[i].TurboOverrides) > 0 then
+        ApplyTurboOverrides(WorldList[i].OptA, GameManifest.Worlds[i].TurboOverrides);
+    end;
   end;
 
   procedure LoadWorld (N: Integer);
@@ -100,13 +91,24 @@ implementation
     Idx := N mod NUM_WORLDS;
 
     { Load sub-level B into WorldMap }
-    ReadWorld(WorldList[Idx].LevelB^, WorldMap, WorldList[Idx].OptionsB^);
+    ReadWorld(WorldList[Idx].LevelB.Map, WorldMap, WorldList[Idx].LevelB.Options);
 
     { Swap B into SaveWorldMap }
     Swap;
 
     { Load sub-level A into WorldMap (now active) }
-    ReadWorld(WorldList[Idx].LevelA^, WorldMap, WorldList[Idx].OptionsA^);
+    ReadWorld(WorldList[Idx].LevelA.Map, WorldMap, WorldList[Idx].LevelA.Options);
+  end;
+
+  function PlayWorldByIndex(N1, N2: Char; WorldIdx: Integer; Player: Byte): Boolean;
+  var
+    Idx: Integer;
+  begin
+    Idx := WorldIdx mod NUM_WORLDS;
+    PlayWorldByIndex := Play.PlayWorld(N1, N2,
+      WorldList[Idx].LevelA.Map, WorldList[Idx].LevelA.Options, WorldList[Idx].OptA,
+      WorldList[Idx].LevelB.Map, WorldList[Idx].LevelB.Options, WorldList[Idx].LevelB.Options,
+      Player);
   end;
 
 end.

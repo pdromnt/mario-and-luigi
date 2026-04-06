@@ -8,11 +8,10 @@ unit Buffers;
 interface
 
   uses
-    VGA256;
+    VGA256, LevelFormat;
 
+  { Tile/map constants re-exported from TileDefs for game compatibility }
   const
-    { Per-tile colored variants use codes #91-#126 (Green/Sand/Brown/Grass walls),
-      #139-#147 (Desert walls), and #178-#216 (pipes/blocks) }
     CanHoldYou    = [#0..#13, '0'..'Z', #91..#126, #139..#147, #178..#216];
     CanStandOn    = [#14..#16, 'a'..'f'];
     Hidden        = ['$'];
@@ -81,40 +80,17 @@ interface
     PictureBuffer = array [plMario .. plLuigi, mdSmall .. mdFire,
       0 .. 3, dirLeft .. dirRight] of PicBuffer;
 
+    { Types aliased from shared LevelFormat unit }
+    MapBuffer = LevelFormat.MapBuffer;
     MapBufferPtr = ^MapBuffer;
-    MapBuffer = array [1 .. MaxWorldSize, 1 .. NV] of Char;
 
     StarBufferPtr = ^StarBuffer;
     StarBuffer = array [0 .. MAX_PAGE, 0 .. 319] of Byte;
 
-    WorldBufferPtr = ^WorldBuffer;
-    WorldBuffer = array [-EX .. MaxWorldSize - 1 + EX,
-      -EY1 .. NV - 1 + EY2] of Char;
+    WorldBuffer = LevelFormat.WorldBuffer;
+    WorldBufferPtr = LevelFormat.WorldBufferPtr;
 
-    WorldOptions = Record
-      InitX,
-      InitY: Word;
-      SkyType,
-      WallType1, WallType2, WallType3,
-      PipeColor,
-      GroundColor1,
-      GroundColor2,
-      Horizon,
-      BackGrType,
-      BackGrColor1,
-      BackGrColor2,
-      Stars,
-      Clouds,
-      Design: Byte;
-      C2r, C2g, C2b,
-      C3r, C3g, C3b,
-      BrickColor,
-      WoodColor,
-      XBlockColor: Byte;
-
-      BuildWall: Boolean;
-      XSize: Word;
-    end;
+    WorldOptions = LevelFormat.WorldOptions;
 
   var
     GameDone,

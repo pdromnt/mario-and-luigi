@@ -12,6 +12,9 @@
 *.res
 !mario.res
 
+# Avoid comitting songs for now
+*.ogg
+
 # Executables
 *.exe
 

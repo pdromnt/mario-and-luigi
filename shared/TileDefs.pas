@@ -12,6 +12,8 @@ const
   { Standard sprite tile dimensions (pixels) }
   TILE_W = 20;
   TILE_H = 14;
+  W = TILE_W;  { Short alias used throughout game code }
+  H = TILE_H;
 
   { Map dimensions }
   NV = 13;               { Vertical tiles per level column }

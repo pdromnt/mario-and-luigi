@@ -14,7 +14,7 @@ if not exist "%FPC%" (
 )
 
 set FPC_OPTS=-Mtp -Ci- -Cr- -Sg -Si -O2
-set UNIT_PATH=-FuSDL2-for-Pascal -Fu.
+set UNIT_PATH=-FuSDL2-for-Pascal -Fu. -Fushared
 
 REM Prepare output directory
 if not exist OUT mkdir OUT
@@ -57,6 +57,12 @@ if exist SDL2_mixer.dll copy /Y SDL2_mixer.dll OUT\ >nul 2>&1
 REM Copy music folder into OUT
 if not exist OUT\music mkdir OUT\music
 if exist music\*.ogg copy /Y music\*.ogg OUT\music\ >nul 2>&1
+
+REM Copy assets folder into OUT
+if exist assets (
+    echo Copying assets...
+    xcopy /Y /E /I assets OUT\assets >nul 2>&1
+)
 
 echo Build complete! Output is in the OUT\ folder.
 echo Run OUT\MARIO.exe to play!

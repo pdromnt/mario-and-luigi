@@ -786,18 +786,12 @@ program Mario;
       Turbo := FALSE;
       Data.Progress[plMario] := Hdr.Level;
       case Hdr.Level of
-        0: PlayWorld(' ', ' ', Level_1a_Data, Options_1a_Data, Opt_1a_Data,
-             Level_1b_Data, Options_1b_Data, Options_1b_Data, plMario);
-        1: PlayWorld(' ', ' ', Level_2a_Data, Options_2a_Data, Opt_2a_Data,
-             Level_2b_Data, Options_2b_Data, Options_2b_Data, plMario);
-        2: PlayWorld(' ', ' ', Level_3a_Data, Options_3a_Data, Opt_3a_Data,
-             Level_3b_Data, Options_3b_Data, Options_3b_Data, plMario);
-        3: PlayWorld(' ', ' ', Level_5a_Data, Options_5a_Data, Opt_5a_Data,
-             Level_5b_Data, Options_5b_Data, Options_5b_Data, plMario);
-        4: PlayWorld(' ', ' ', Level_6a_Data, Options_6a_Data, Opt_6a_Data,
-             Level_6b_Data, Options_6b_Data, Options_6b_Data, plMario);
-        5: PlayWorld(' ', ' ', Level_4a_Data, Options_4a_Data, Opt_4a_Data,
-             Level_4b_Data, Options_4b_Data, Options_4b_Data, plMario);
+        0: PlayWorldByIndex(' ', ' ', 0, plMario);
+        1: PlayWorldByIndex(' ', ' ', 1, plMario);
+        2: PlayWorldByIndex(' ', ' ', 2, plMario);
+        3: PlayWorldByIndex(' ', ' ', 3, plMario);
+        4: PlayWorldByIndex(' ', ' ', 4, plMario);
+        5: PlayWorldByIndex(' ', ' ', 5, plMario);
       end;
     end
     else
@@ -807,8 +801,7 @@ program Mario;
       Turbo := FALSE;
       Data.Progress[plMario] := 5;
       PlayMacro;
-      PlayWorld (' ', ' ', Level_6a_Data, Options_6a_Data, Options_6a_Data,
-        Level_6b_Data, Options_6b_Data, Options_6b_Data, plMario);
+      PlayWorldByIndex(' ', ' ', 5, plMario);
     end;
     StopMacro;
   end;
@@ -824,18 +817,12 @@ program Mario;
     Turbo := FALSE;
     Data.Progress[plMario] := Hdr.Level;
     case Hdr.Level of
-      0: PlayWorld(' ', ' ', Level_1a_Data, Options_1a_Data, Opt_1a_Data,
-           Level_1b_Data, Options_1b_Data, Options_1b_Data, plMario);
-      1: PlayWorld(' ', ' ', Level_2a_Data, Options_2a_Data, Opt_2a_Data,
-           Level_2b_Data, Options_2b_Data, Options_2b_Data, plMario);
-      2: PlayWorld(' ', ' ', Level_3a_Data, Options_3a_Data, Opt_3a_Data,
-           Level_3b_Data, Options_3b_Data, Options_3b_Data, plMario);
-      3: PlayWorld(' ', ' ', Level_5a_Data, Options_5a_Data, Opt_5a_Data,
-           Level_5b_Data, Options_5b_Data, Options_5b_Data, plMario);
-      4: PlayWorld(' ', ' ', Level_6a_Data, Options_6a_Data, Opt_6a_Data,
-           Level_6b_Data, Options_6b_Data, Options_6b_Data, plMario);
-      5: PlayWorld(' ', ' ', Level_4a_Data, Options_4a_Data, Opt_4a_Data,
-           Level_4b_Data, Options_4b_Data, Options_4b_Data, plMario);
+      0: PlayWorldByIndex(' ', ' ', 0, plMario);
+      1: PlayWorldByIndex(' ', ' ', 1, plMario);
+      2: PlayWorldByIndex(' ', ' ', 2, plMario);
+      3: PlayWorldByIndex(' ', ' ', 3, plMario);
+      4: PlayWorldByIndex(' ', ' ', 4, plMario);
+      5: PlayWorldByIndex(' ', ' ', 5, plMario);
     end;
     StopMacro;
   end;
@@ -953,8 +940,8 @@ program Mario;
       ShowHiScoreFromMenu := FALSE;
       NewData;
 
-      PlayWorld (#0, #0, Intro_0_Data, Options_0_Data, Options_0_Data,
-        Intro_0_Data, Options_0_Data, Options_0_Data, plMario);
+      PlayWorld (#0, #0, IntroLevel.Map, IntroLevel.Options, IntroLevel.Options,
+        IntroLevel.Map, IntroLevel.Options, IntroLevel.Options, plMario);
       InitBackGr (3, 0);
 
       OutPalette ($A0, 35, 45, 50);
@@ -1786,18 +1773,12 @@ begin  { Mario }
             ShowPlayerName (CurPlayer);
          {$ENDIF}
             case Data.Progress [CurPlayer] mod NUM_LEV of
-              0: Passed := PlayWorld ('x', '1', Level_1a_Data, Options_1a_Data, Opt_1a_Data,
-                   Level_1b_Data, Options_1b_Data, Options_1b_Data, CurPlayer);
-              1: Passed := PlayWorld ('x', '2', Level_2a_Data, Options_2a_Data, Opt_2a_Data,
-                   Level_2b_Data, Options_2b_Data, Options_2b_Data, CurPlayer);
-              2: Passed := PlayWorld ('x', '3', Level_3a_Data, Options_3a_Data, Opt_3a_Data,
-                   Level_3b_Data, Options_3b_Data, Options_3b_Data, CurPlayer);
-              3: Passed := PlayWorld ('x', '4', Level_5a_Data, Options_5a_Data, Opt_5a_Data,
-                   Level_5b_Data, Options_5b_Data, Options_5b_Data, CurPlayer);
-              4: Passed := PlayWorld ('x', '5', Level_6a_Data, Options_6a_Data, Opt_6a_Data,
-                   Level_6b_Data, Options_6b_Data, Options_6b_Data, CurPlayer);
-              5: Passed := PlayWorld ('x', '6', Level_4a_Data, Options_4a_Data, Opt_4a_Data,
-                   Level_4b_Data, Options_4b_Data, Options_4b_Data, CurPlayer);
+              0: Passed := PlayWorldByIndex('x', '1', 0, CurPlayer);
+              1: Passed := PlayWorldByIndex('x', '2', 1, CurPlayer);
+              2: Passed := PlayWorldByIndex('x', '3', 2, CurPlayer);
+              3: Passed := PlayWorldByIndex('x', '4', 3, CurPlayer);
+              4: Passed := PlayWorldByIndex('x', '5', 4, CurPlayer);
+              5: Passed := PlayWorldByIndex('x', '6', 5, CurPlayer);
               else
                 EndGame := TRUE;
             end;
