@@ -61,7 +61,8 @@ if exist music\*.ogg copy /Y music\*.ogg OUT\music\ >nul 2>&1
 REM Copy assets folder into OUT
 if exist assets (
     echo Copying assets...
-    xcopy /Y /E /I assets OUT\assets >nul 2>&1
+    robocopy assets OUT\assets /E /NFL /NDL /NJH /NJS /NP >nul 2>&1
+    if errorlevel 8 echo WARNING: Failed to copy assets!
 )
 
 echo Build complete! Output is in the OUT\ folder.

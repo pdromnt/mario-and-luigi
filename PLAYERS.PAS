@@ -14,7 +14,9 @@ interface
     Music,
     Txt,
     KeyBoard,
-    Joystick;
+    Joystick,
+    SpriteLoader,
+    AssetPaths;
 
   const
     stOnTheGround = 0;
@@ -44,6 +46,7 @@ interface
     EarthQuakeCounter: Integer;
     Small: Integer;
 
+  procedure LoadPlayerSprites;
   procedure InitPlayerFigures;
   procedure InitPlayer (InitX, InitY: Integer; Name: Byte);
   procedure GetPlayerPos (var PX, PY: Integer);
@@ -55,19 +58,55 @@ interface
 
 implementation
 
-  {$I sprites\SWMAR000.inc} {$I sprites\SWMAR001.inc}
-  {$I sprites\SJMAR000.inc} {$I sprites\SJMAR001.inc}
-  {$I sprites\LWMAR000.inc} {$I sprites\LWMAR001.inc}
-  {$I sprites\LJMAR000.inc} {$I sprites\LJMAR001.inc}
-  {$I sprites\FWMAR000.inc} {$I sprites\FWMAR001.inc}
-  {$I sprites\FJMAR000.inc} {$I sprites\FJMAR001.inc}
+  type
+    TPlayerSprite = array[0..559] of Byte;  { 20x28 = 560 bytes }
 
-  {$I sprites\SWLUI000.inc} {$I sprites\SWLUI001.inc}
-  {$I sprites\SJLUI000.inc} {$I sprites\SJLUI001.inc}
-  {$I sprites\LWLUI000.inc} {$I sprites\LWLUI001.inc}
-  {$I sprites\LJLUI000.inc} {$I sprites\LJLUI001.inc}
-  {$I sprites\FWLUI000.inc} {$I sprites\FWLUI001.inc}
-  {$I sprites\FJLUI000.inc} {$I sprites\FJLUI001.inc}
+  var
+    { Mario sprites: S=small, L=large, F=fire, W=walk, J=jump }
+    SWMar000, SWMar001, SJMar000, SJMar001: TPlayerSprite;
+    LWMar000, LWMar001, LJMar000, LJMar001: TPlayerSprite;
+    FWMar000, FWMar001, FJMar000, FJMar001: TPlayerSprite;
+    { Luigi sprites }
+    SWLui000, SWLui001, SJLui000, SJLui001: TPlayerSprite;
+    LWLui000, LWLui001, LJLui000, LJLui001: TPlayerSprite;
+    FWLui000, FWLui001, FJLui000, FJLui001: TPlayerSprite;
+
+  procedure LoadPlSpr(const SubPath: string; var Dest: TPlayerSprite);
+  var
+    Spr: TSpriteData;
+  begin
+    LoadSprite(SpritePath(SubPath), Spr);
+    if Length(Spr.Pixels) >= SizeOf(TPlayerSprite) then
+      Move(Spr.Pixels[0], Dest, SizeOf(TPlayerSprite));
+  end;
+
+  procedure LoadPlayerSprites;
+  begin
+    LoadPlSpr('players/swmar000.sprite', SWMar000);
+    LoadPlSpr('players/swmar001.sprite', SWMar001);
+    LoadPlSpr('players/sjmar000.sprite', SJMar000);
+    LoadPlSpr('players/sjmar001.sprite', SJMar001);
+    LoadPlSpr('players/lwmar000.sprite', LWMar000);
+    LoadPlSpr('players/lwmar001.sprite', LWMar001);
+    LoadPlSpr('players/ljmar000.sprite', LJMar000);
+    LoadPlSpr('players/ljmar001.sprite', LJMar001);
+    LoadPlSpr('players/fwmar000.sprite', FWMar000);
+    LoadPlSpr('players/fwmar001.sprite', FWMar001);
+    LoadPlSpr('players/fjmar000.sprite', FJMar000);
+    LoadPlSpr('players/fjmar001.sprite', FJMar001);
+    LoadPlSpr('players/swlui000.sprite', SWLui000);
+    LoadPlSpr('players/swlui001.sprite', SWLui001);
+    LoadPlSpr('players/sjlui000.sprite', SJLui000);
+    LoadPlSpr('players/sjlui001.sprite', SJLui001);
+    LoadPlSpr('players/lwlui000.sprite', LWLui000);
+    LoadPlSpr('players/lwlui001.sprite', LWLui001);
+    LoadPlSpr('players/ljlui000.sprite', LJLui000);
+    LoadPlSpr('players/ljlui001.sprite', LJLui001);
+    LoadPlSpr('players/fwlui000.sprite', FWLui000);
+    LoadPlSpr('players/fwlui001.sprite', FWLui001);
+    LoadPlSpr('players/fjlui000.sprite', FJLui000);
+    LoadPlSpr('players/fjlui001.sprite', FJLui001);
+  end;
 
   const
     Safe = EY1;

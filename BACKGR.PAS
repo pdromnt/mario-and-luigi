@@ -21,6 +21,7 @@ interface
   var
     BackGround: Byte;
 
+  procedure LoadBackGrData;
   procedure InitBackGr (NewBackGr, bClouds: Byte);
   procedure DrawBackGr (FirstTime: Boolean);
   procedure DrawBackGrMap (Y1, Y2, Shift: Integer; C: Byte);
@@ -36,10 +37,37 @@ interface
 
 implementation
 
-  {$I data\palbrick.inc}
-  {$I data\palpill.inc}
+  uses
+    AssetPaths;
 
-  {$I data\backgrounds.inc}
+  var
+    Palbrick000Data: array[0..279] of Byte;
+    Palpill000Data, Palpill001Data, Palpill002Data: array[0..279] of Byte;
+    BogenData, Bogen7Data, Bogen26Data, MountData: array[0..1559] of Byte;
+
+  procedure LoadBackGrData;
+  var
+    F: File;
+    procedure LoadRaw(const Path: string; var Dest; Size: Integer);
+    begin
+      Assign(F, Path);
+      {$I-} Reset(F, 1); {$I+}
+      if IOResult = 0 then
+      begin
+        BlockRead(F, Dest, Size);
+        Close(F);
+      end;
+    end;
+  begin
+    LoadRaw(AssetPaths.PalettePath('brick.pal'), Palbrick000Data, SizeOf(Palbrick000Data));
+    LoadRaw(AssetPaths.PalettePath('pill_0.pal'), Palpill000Data, SizeOf(Palpill000Data));
+    LoadRaw(AssetPaths.PalettePath('pill_1.pal'), Palpill001Data, SizeOf(Palpill001Data));
+    LoadRaw(AssetPaths.PalettePath('pill_2.pal'), Palpill002Data, SizeOf(Palpill002Data));
+    LoadRaw(AssetPaths.BackgroundPath('bogen.bg'), BogenData, SizeOf(BogenData));
+    LoadRaw(AssetPaths.BackgroundPath('bogen7.bg'), Bogen7Data, SizeOf(Bogen7Data));
+    LoadRaw(AssetPaths.BackgroundPath('bogen26.bg'), Bogen26Data, SizeOf(Bogen26Data));
+    LoadRaw(AssetPaths.BackgroundPath('mount.bg'), MountData, SizeOf(MountData));
+  end;
 
   const
     Speed = 3;

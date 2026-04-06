@@ -13,7 +13,9 @@ interface
     Buffers,
     Palettes,
     VGA256,
-    BackGr;
+    BackGr,
+    SpriteLoader,
+    AssetPaths;
 
   const
     N1 = 3;
@@ -142,6 +144,9 @@ interface
 
   { Initialize all pre-colored sprite arrays from pristine sprite data.
     Must be called AFTER SaveSpriteBackups and AFTER palette is loaded. }
+  { Load all tile sprites from asset files. Must be called at startup. }
+  procedure LoadFiguresSprites;
+
   procedure InitColoredSprites;
 
   { Set the safe palette slots ($B8-$BE) to correct colors for
@@ -151,69 +156,179 @@ interface
 
 implementation
 
-  { -- Sprite data includes (linear byte-per-pixel format) -- }
+  { -- Sprite data: loaded from .sprite asset files at runtime -- }
 
-  {$I sprites\GREEN000.inc} {$I sprites\GREEN001.inc} {$I sprites\GREEN002.inc}
-  {$I sprites\GREEN003.inc} {$I sprites\GREEN004.inc}
+  type
+    TSpriteArray = array[0..279] of Byte;  { Standard 20x14 tile sprite }
 
-  {$I sprites\GROUND000.inc} {$I sprites\GROUND001.inc} {$I sprites\GROUND002.inc}
-  {$I sprites\GROUND003.inc} {$I sprites\GROUND004.inc}
+  var
+    { Walls }
+    Green000, Green001, Green002, Green003, Green004: TSpriteArray;
+    Ground000, Ground001, Ground002, Ground003, Ground004: TSpriteArray;
+    Sand000, Sand001, Sand002, Sand003, Sand004: TSpriteArray;
+    Brown000, Brown001, Brown002, Brown003, Brown004: TSpriteArray;
+    Grass000, Grass001, Grass002, Grass003, Grass004: TSpriteArray;
+    Des000, Des001, Des002, Des003, Des004: TSpriteArray;
+    Grass1000, Grass2000, Grass3000: TSpriteArray;
+    Grass1001, Grass2001, Grass3001: TSpriteArray;
+    Grass1002, Grass2002, Grass3002: TSpriteArray;
 
-  {$I sprites\SAND000.inc} {$I sprites\SAND001.inc} {$I sprites\SAND002.inc}
-  {$I sprites\SAND003.inc} {$I sprites\SAND004.inc}
+    { Pipes }
+    Pipe000, Pipe001, Pipe002, Pipe003: TSpriteArray;
 
-  {$I sprites\BROWN000.inc} {$I sprites\BROWN001.inc} {$I sprites\BROWN002.inc}
-  {$I sprites\BROWN003.inc} {$I sprites\BROWN004.inc}
+    { Blocks }
+    Block000, Block001: TSpriteArray;
+    Quest000, Quest001: TSpriteArray;
 
-  {$I sprites\GRASS000.inc} {$I sprites\GRASS001.inc} {$I sprites\GRASS002.inc}
-  {$I sprites\GRASS003.inc} {$I sprites\GRASS004.inc}
+    { Palms }
+    WPalm000: TSpriteArray;
+    Palm0000, Palm1000, Palm2000, Palm3000: TSpriteArray;
+    Palm0001, Palm1001, Palm2001, Palm3001: TSpriteArray;
+    Palm0002, Palm1002, Palm2002, Palm3002: TSpriteArray;
 
-  {$I sprites\DES000.inc} {$I sprites\DES001.inc} {$I sprites\DES002.inc}
-  {$I sprites\DES003.inc} {$I sprites\DES004.inc}
+    { Decorations }
+    Fence000, Fence001: TSpriteArray;
+    Pin000: TSpriteArray;
+    Fall000, Fall001: TSpriteArray;
+    Lava000, Lava001: TSpriteArray;
+    Lava2001, Lava2002, Lava2003, Lava2004, Lava2005: TSpriteArray;
+    Tree000, Tree001, Tree002, Tree003: TSpriteArray;
+    Window000, Window001: TSpriteArray;
+    SmTree000, SmTree001: TSpriteArray;
 
-  {$I sprites\GRASS1000.inc} {$I sprites\GRASS2000.inc} {$I sprites\GRASS3000.inc}
-  {$I sprites\GRASS1001.inc} {$I sprites\GRASS2001.inc} {$I sprites\GRASS3001.inc}
-  {$I sprites\GRASS1002.inc} {$I sprites\GRASS2002.inc} {$I sprites\GRASS3002.inc}
+    { Bricks }
+    Brick0000, Brick0001, Brick0002: TSpriteArray;
+    Brick1000, Brick1001, Brick1002: TSpriteArray;
+    Brick2000, Brick2001, Brick2002: TSpriteArray;
 
-  {$I sprites\PIPE000.inc} {$I sprites\PIPE001.inc} {$I sprites\PIPE002.inc} {$I sprites\PIPE003.inc}
+    { Items }
+    Exit000, Exit001: TSpriteArray;
+    Wood000: TSpriteArray;
+    Coin000: TSpriteArray;
+    Note000: TSpriteArray;
+    XBlock000: TSpriteArray;
 
-  {$I sprites\BLOCK000.inc} {$I sprites\BLOCK001.inc}
+  { Helper: load a .sprite file into a 280-byte array }
+  procedure LoadSpr(const SubPath: string; var Dest: TSpriteArray);
+  var
+    Spr: TSpriteData;
+  begin
+    LoadSprite(SpritePath(SubPath), Spr);
+    if Length(Spr.Pixels) >= SizeOf(TSpriteArray) then
+      Move(Spr.Pixels[0], Dest, SizeOf(TSpriteArray));
+  end;
 
-  {$I sprites\QUEST000.inc} {$I sprites\QUEST001.inc}
+  procedure LoadFiguresSprites;
+  begin
+    { Walls }
+    LoadSpr('walls/green000.sprite', Green000);
+    LoadSpr('walls/green001.sprite', Green001);
+    LoadSpr('walls/green002.sprite', Green002);
+    LoadSpr('walls/green003.sprite', Green003);
+    LoadSpr('walls/green004.sprite', Green004);
+    LoadSpr('walls/ground000.sprite', Ground000);
+    LoadSpr('walls/ground001.sprite', Ground001);
+    LoadSpr('walls/ground002.sprite', Ground002);
+    LoadSpr('walls/ground003.sprite', Ground003);
+    LoadSpr('walls/ground004.sprite', Ground004);
+    LoadSpr('walls/sand000.sprite', Sand000);
+    LoadSpr('walls/sand001.sprite', Sand001);
+    LoadSpr('walls/sand002.sprite', Sand002);
+    LoadSpr('walls/sand003.sprite', Sand003);
+    LoadSpr('walls/sand004.sprite', Sand004);
+    LoadSpr('walls/brown000.sprite', Brown000);
+    LoadSpr('walls/brown001.sprite', Brown001);
+    LoadSpr('walls/brown002.sprite', Brown002);
+    LoadSpr('walls/brown003.sprite', Brown003);
+    LoadSpr('walls/brown004.sprite', Brown004);
+    LoadSpr('walls/grass000.sprite', Grass000);
+    LoadSpr('walls/grass001.sprite', Grass001);
+    LoadSpr('walls/grass002.sprite', Grass002);
+    LoadSpr('walls/grass003.sprite', Grass003);
+    LoadSpr('walls/grass004.sprite', Grass004);
+    LoadSpr('walls/des000.sprite', Des000);
+    LoadSpr('walls/des001.sprite', Des001);
+    LoadSpr('walls/des002.sprite', Des002);
+    LoadSpr('walls/des003.sprite', Des003);
+    LoadSpr('walls/des004.sprite', Des004);
+    LoadSpr('walls/grass1000.sprite', Grass1000);
+    LoadSpr('walls/grass2000.sprite', Grass2000);
+    LoadSpr('walls/grass3000.sprite', Grass3000);
+    LoadSpr('walls/grass1001.sprite', Grass1001);
+    LoadSpr('walls/grass2001.sprite', Grass2001);
+    LoadSpr('walls/grass3001.sprite', Grass3001);
+    LoadSpr('walls/grass1002.sprite', Grass1002);
+    LoadSpr('walls/grass2002.sprite', Grass2002);
+    LoadSpr('walls/grass3002.sprite', Grass3002);
 
-  {$I sprites\WPALM000.inc}
+    { Pipes }
+    LoadSpr('tiles/pipe000.sprite', Pipe000);
+    LoadSpr('tiles/pipe001.sprite', Pipe001);
+    LoadSpr('tiles/pipe002.sprite', Pipe002);
+    LoadSpr('tiles/pipe003.sprite', Pipe003);
 
-  {$I sprites\PALM0000.inc} {$I sprites\PALM1000.inc} {$I sprites\PALM2000.inc} {$I sprites\PALM3000.inc}
-  {$I sprites\PALM0001.inc} {$I sprites\PALM1001.inc} {$I sprites\PALM2001.inc} {$I sprites\PALM3001.inc}
-  {$I sprites\PALM0002.inc} {$I sprites\PALM1002.inc} {$I sprites\PALM2002.inc} {$I sprites\PALM3002.inc}
+    { Blocks }
+    LoadSpr('tiles/block000.sprite', Block000);
+    LoadSpr('tiles/block001.sprite', Block001);
+    LoadSpr('tiles/quest000.sprite', Quest000);
+    LoadSpr('tiles/quest001.sprite', Quest001);
 
-  {$I sprites\FENCE000.inc} {$I sprites\FENCE001.inc}
-  {$I sprites\PIN000.inc}
+    { Palms }
+    LoadSpr('decorations/wpalm000.sprite', WPalm000);
+    LoadSpr('decorations/palm0000.sprite', Palm0000);
+    LoadSpr('decorations/palm1000.sprite', Palm1000);
+    LoadSpr('decorations/palm2000.sprite', Palm2000);
+    LoadSpr('decorations/palm3000.sprite', Palm3000);
+    LoadSpr('decorations/palm0001.sprite', Palm0001);
+    LoadSpr('decorations/palm1001.sprite', Palm1001);
+    LoadSpr('decorations/palm2001.sprite', Palm2001);
+    LoadSpr('decorations/palm3001.sprite', Palm3001);
+    LoadSpr('decorations/palm0002.sprite', Palm0002);
+    LoadSpr('decorations/palm1002.sprite', Palm1002);
+    LoadSpr('decorations/palm2002.sprite', Palm2002);
+    LoadSpr('decorations/palm3002.sprite', Palm3002);
 
-  {$I sprites\FALL000.inc} {$I sprites\FALL001.inc}
-  {$I sprites\LAVA000.inc} {$I sprites\LAVA001.inc}
+    { Decorations }
+    LoadSpr('decorations/fence000.sprite', Fence000);
+    LoadSpr('decorations/fence001.sprite', Fence001);
+    LoadSpr('tiles/pin000.sprite', Pin000);
+    LoadSpr('decorations/fall000.sprite', Fall000);
+    LoadSpr('decorations/fall001.sprite', Fall001);
+    LoadSpr('decorations/lava000.sprite', Lava000);
+    LoadSpr('decorations/lava001.sprite', Lava001);
+    LoadSpr('decorations/lava2001.sprite', Lava2001);
+    LoadSpr('decorations/lava2002.sprite', Lava2002);
+    LoadSpr('decorations/lava2003.sprite', Lava2003);
+    LoadSpr('decorations/lava2004.sprite', Lava2004);
+    LoadSpr('decorations/lava2005.sprite', Lava2005);
+    LoadSpr('decorations/tree000.sprite', Tree000);
+    LoadSpr('decorations/tree001.sprite', Tree001);
+    LoadSpr('decorations/tree002.sprite', Tree002);
+    LoadSpr('decorations/tree003.sprite', Tree003);
+    LoadSpr('decorations/window000.sprite', Window000);
+    LoadSpr('decorations/window001.sprite', Window001);
+    LoadSpr('decorations/smtree000.sprite', SmTree000);
+    LoadSpr('decorations/smtree001.sprite', SmTree001);
 
-  {$I sprites\LAVA2001.inc} {$I sprites\LAVA2002.inc} {$I sprites\LAVA2003.inc}
-  {$I sprites\LAVA2004.inc} {$I sprites\LAVA2005.inc}
+    { Bricks }
+    LoadSpr('tiles/brick0000.sprite', Brick0000);
+    LoadSpr('tiles/brick0001.sprite', Brick0001);
+    LoadSpr('tiles/brick0002.sprite', Brick0002);
+    LoadSpr('tiles/brick1000.sprite', Brick1000);
+    LoadSpr('tiles/brick1001.sprite', Brick1001);
+    LoadSpr('tiles/brick1002.sprite', Brick1002);
+    LoadSpr('tiles/brick2000.sprite', Brick2000);
+    LoadSpr('tiles/brick2001.sprite', Brick2001);
+    LoadSpr('tiles/brick2002.sprite', Brick2002);
 
-  {$I sprites\TREE000.inc} {$I sprites\TREE001.inc} {$I sprites\TREE002.inc} {$I sprites\TREE003.inc}
-
-  {$I sprites\BRICK0000.inc} {$I sprites\BRICK0001.inc} {$I sprites\BRICK0002.inc}
-  {$I sprites\BRICK1000.inc} {$I sprites\BRICK1001.inc} {$I sprites\BRICK1002.inc}
-  {$I sprites\BRICK2000.inc} {$I sprites\BRICK2001.inc} {$I sprites\BRICK2002.inc}
-
-  {$I sprites\EXIT000.inc} {$I sprites\EXIT001.inc}
-  {$I sprites\WOOD000.inc}
-
-  {$I sprites\COIN000.inc}
-
-  {$I sprites\NOTE000.inc}
-
-  {$I sprites\WINDOW000.inc} {$I sprites\WINDOW001.inc}
-
-  {$I sprites\SMTREE000.inc} {$I sprites\SMTREE001.inc}
-
-  {$I sprites\XBLOCK000.inc}
+    { Items }
+    LoadSpr('tiles/exit000.sprite', Exit000);
+    LoadSpr('tiles/exit001.sprite', Exit001);
+    LoadSpr('tiles/wood000.sprite', Wood000);
+    LoadSpr('tiles/coin000.sprite', Coin000);
+    LoadSpr('tiles/note000.sprite', Note000);
+    LoadSpr('tiles/xblock000.sprite', XBlock000);
+  end;
 
 
   { -- Helper: copy sprite constant data into an ImageBuffer -- }

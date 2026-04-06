@@ -28,6 +28,9 @@ program Mario;
     Music,
     BGMusic,
     CustomLv,
+    TmpObj,
+    SpriteLoader,
+    AssetPaths,
     {$IFDEF UNIX}
     dos,
     {$ENDIF}
@@ -102,14 +105,33 @@ program Mario;
     Saves: SaveData;
     HiScores: HiScoreTable;
 
-  {$I sprites\BLOCK000.inc}
+  var
+    Block000: array[0..279] of Byte;     { 20x14 }
+    Intro000: array[0..3023] of Byte;    { 108x28 }
+    Intro001: array[0..671] of Byte;     { 24x28 }
+    Intro002: array[0..2351] of Byte;    { 84x28 }
+    Start000: array[0..1507] of Byte;    { 116x13 }
+    Start001: array[0..1403] of Byte;    { 108x13 }
 
-  {$I sprites\INTRO000.inc}
-  {$I sprites\INTRO001.inc}
-  {$I sprites\INTRO002.inc}
+  procedure LoadMarioSprites;
+  var
+    Spr: TSpriteData;
 
-  {$I sprites\START000.inc}
-  {$I sprites\START001.inc}
+    procedure Ld(const SubPath: string; var Dest; DestSize: Integer);
+    begin
+      LoadSprite(SpritePath(SubPath), Spr);
+      if Length(Spr.Pixels) >= DestSize then
+        Move(Spr.Pixels[0], Dest, DestSize);
+    end;
+
+  begin
+    Ld('tiles/block000.sprite', Block000, SizeOf(Block000));
+    Ld('effects/intro000.sprite', Intro000, SizeOf(Intro000));
+    Ld('effects/intro001.sprite', Intro001, SizeOf(Intro001));
+    Ld('effects/intro002.sprite', Intro002, SizeOf(Intro002));
+    Ld('effects/start000.sprite', Start000, SizeOf(Start000));
+    Ld('effects/start001.sprite', Start001, SizeOf(Start001));
+  end;
 
   procedure NewData;
   begin
@@ -1677,6 +1699,13 @@ program Mario;
 begin  { Mario }
   InitKeyBoard;
   InitWorlds;
+  LoadFiguresSprites;
+  LoadEnemySprites;
+  LoadPlayerSprites;
+  LoadTmpObjSprites;
+  LoadMarioSprites;
+  LoadBackGrData;
+  LoadFontData;
   Data.NumPlayers := 1;
   ReadConfig;
   ReadHiScores;

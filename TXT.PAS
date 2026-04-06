@@ -6,13 +6,15 @@ interface
 
   uses
     VGA256,
-    Buffers;
+    Buffers,
+    AssetPaths;
 
   const
     Normal      = $00;
     Bold        = $01;
     Shadow      = $02;
 
+  procedure LoadFontData;
   procedure SetFont (i: Integer; Style: Word);
   function Letter (i: Integer): Pointer;
   function TextWidth (S: String): Integer;
@@ -22,9 +24,27 @@ interface
 
 implementation
 
-  { Include font data as typed constants }
-  {$I data\font.inc}
-  {$I data\font8x8.inc}
+  var
+    SwissFontData: array[0..4555] of Byte;
+    Font8x8Data: array[0..1293] of Byte;
+
+  procedure LoadFontData;
+  var
+    F: File;
+    procedure LoadRaw(const Path: string; var Dest; Size: Integer);
+    begin
+      Assign(F, Path);
+      {$I-} Reset(F, 1); {$I+}
+      if IOResult = 0 then
+      begin
+        BlockRead(F, Dest, Size);
+        Close(F);
+      end;
+    end;
+  begin
+    LoadRaw(AssetPaths.FontPath('swiss.font'), SwissFontData, SizeOf(SwissFontData));
+    LoadRaw(AssetPaths.FontPath('font8x8.font'), Font8x8Data, SizeOf(Font8x8Data));
+  end;
 
   const
     bShadow: Boolean = FALSE;

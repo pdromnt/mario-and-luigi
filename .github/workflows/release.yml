@@ -28,7 +28,7 @@ jobs:
       - name: Compile
         shell: cmd
         run: |
-          ppcx64 -Mtp -Ci- -Cr- -Sg -Si -O2 -FuC:\fpc\units\x86_64-win64\* -FuSDL2-for-Pascal -Fu. -FE. MARIO.PAS
+          ppcx64 -Mtp -Ci- -Cr- -Sg -Si -O2 -FuC:\fpc\units\x86_64-win64\* -FuSDL2-for-Pascal -Fu. -Fushared -FE. MARIO.PAS
 
       - name: Package
         shell: bash
@@ -40,6 +40,7 @@ jobs:
             mkdir -p staging/music
             cp music/*.ogg staging/music/
           fi
+          cp -r assets staging/assets
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -61,7 +62,7 @@ jobs:
 
       - name: Compile
         run: |
-          fpc -Mtp -Ci- -Cr- -Sg -Si -O2 -Fl$(brew --prefix)/lib -FuSDL2-for-Pascal -Fu. -omario MARIO.PAS
+          fpc -Mtp -Ci- -Cr- -Sg -Si -O2 -Fl$(brew --prefix)/lib -FuSDL2-for-Pascal -Fu. -Fushared -omario MARIO.PAS
 
       - name: Create .app bundle
         run: |
@@ -78,6 +79,9 @@ jobs:
 
           # Copy music into Resources (if present)
           cp music/*.ogg "$APP/Contents/Resources/music/" 2>/dev/null || true
+
+          # Copy assets into Resources
+          cp -r assets "$APP/Contents/Resources/assets"
 
           # Symlink music into MacOS/ so GetMusicPath (relative to binary) finds it
           ln -s ../Resources/music "$APP/Contents/MacOS/music"
@@ -202,7 +206,7 @@ jobs:
 
       - name: Compile
         run: |
-          fpc -Mtp -Ci- -Cr- -Sg -Si -O2 -FuSDL2-for-Pascal -Fu. -omario MARIO.PAS
+          fpc -Mtp -Ci- -Cr- -Sg -Si -O2 -FuSDL2-for-Pascal -Fu. -Fushared -omario MARIO.PAS
 
       - name: Package
         run: |
@@ -212,6 +216,7 @@ jobs:
             mkdir -p staging/music
             cp music/*.ogg staging/music/
           fi
+          cp -r assets staging/assets
           cat > staging/README.txt << 'EOF'
           Mario & Luigi — SDL2 Port (Linux x86_64)
           ==========================================
@@ -248,7 +253,7 @@ jobs:
             apt-get update
             apt-get install -y fpc libsdl2-dev libsdl2-mixer-dev
           run: |
-            fpc -Mtp -Ci- -Cr- -Sg -Si -O2 -FuSDL2-for-Pascal -Fu. -omario MARIO.PAS
+            fpc -Mtp -Ci- -Cr- -Sg -Si -O2 -FuSDL2-for-Pascal -Fu. -Fushared -omario MARIO.PAS
 
       - name: Package
         run: |
@@ -258,6 +263,7 @@ jobs:
             mkdir -p staging/music
             cp music/*.ogg staging/music/
           fi
+          cp -r assets staging/assets
           cat > staging/README.txt << 'EOF'
           Mario & Luigi — SDL2 Port (Linux ARM64)
           ==========================================

@@ -76,10 +76,10 @@ interface
 implementation
 
   uses
-    VGA256;
+    VGA256, PaletteLoader, AssetPaths;
 
-  { Include the extracted palette data as a typed constant }
-  {$I data\mpal256.inc}
+  var
+    Pal256Data: array[0..767] of Byte;
 
   var
     FadingUp,
@@ -381,6 +381,15 @@ implementation
     ModifyPalette := TRUE;
   end;
 
+procedure LoadPaletteData;
+var
+  Pal: TPaletteData;
 begin
+  LoadPalette(PalettePath('main.pal'), Pal);
+  Move(Pal, Pal256Data, SizeOf(Pal256Data));
+end;
+
+begin
+  LoadPaletteData;
   P256 := @Pal256Data;
 end.

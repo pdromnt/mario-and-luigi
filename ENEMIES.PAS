@@ -8,7 +8,9 @@ interface
     VGA256,
     Glitter,
     TmpObj,
-    Music;
+    Music,
+    SpriteLoader,
+    AssetPaths;
 
   const
     StartEnemiesAt  = 2;
@@ -80,6 +82,7 @@ interface
     PlayerYVel: Integer;
     Star: Boolean;
 
+  procedure LoadEnemySprites;
   procedure InitEnemyFigures;
   procedure ClearEnemies;
   procedure StopEnemies;
@@ -98,40 +101,98 @@ interface
 
 implementation
 
-  {$I sprites\CHIBIBO000.inc} {$I sprites\CHIBIBO001.inc}
-  {$I sprites\CHIBIBO002.inc} {$I sprites\CHIBIBO003.inc}
-  {$I sprites\CHAMP000.inc}
-  {$I sprites\POISON000.inc}
-  {$I sprites\LIFE000.inc}
-  {$I sprites\FLOWER000.inc}
-  {$I sprites\STAR000.inc}
-  {$I sprites\FISH001.inc}
-  {$I sprites\PPLANT000.inc} {$I sprites\PPLANT001.inc}
-  {$I sprites\PPLANT002.inc} {$I sprites\PPLANT003.inc}
-  {$I sprites\RED000.inc} {$I sprites\RED001.inc}
-
-  {$I sprites\F000.inc} {$I sprites\F001.inc} {$I sprites\F002.inc} {$I sprites\F003.inc}
-
-  {$I sprites\HIT000.inc}
-
-  {$I sprites\GRKOOPA000.inc} {$I sprites\GRKOOPA001.inc}
-  {$I sprites\RDKOOPA000.inc} {$I sprites\RDKOOPA001.inc}
-  {$I sprites\GRKP000.inc} {$I sprites\GRKP001.inc}
-  {$I sprites\RDKP000.inc} {$I sprites\RDKP001.inc}
-
-  {$I sprites\LIFT1000.inc}
-  {$I sprites\DONUT000.inc} {$I sprites\DONUT001.inc}
+  type
+    TStdSprite = array[0..279] of Byte;       { 20x14 }
+    TKoopaSprite = array[0..479] of Byte;     { 20x24 }
+    TPiranhaSprite = array[0..479] of Byte;   { 24x20 }
 
   var
+    { Standard 20x14 enemies }
+    Chibibo000, Chibibo001, Chibibo002, Chibibo003: TStdSprite;
+    Champ000, Poison000, Life000, Flower000, Star000: TStdSprite;
+    Fish001: TStdSprite;
+    Red000, Red001: TStdSprite;
+    F000, F001, F002, F003: TStdSprite;
+    Hit000: TStdSprite;
+    GrKp000, GrKp001, RdKp000, RdKp001: TStdSprite;
+    Lift1000: TStdSprite;
+    Donut000, Donut001: TStdSprite;
+    Fire000, Fire001: TStdSprite;
+
+    { 20x24 Koopa sprites }
+    GrKoopa000, GrKoopa001: TKoopaSprite;
+    RdKoopa000, RdKoopa001: TKoopaSprite;
+
+    { 24x20 Piranha sprites }
+    PPlant000, PPlant001, PPlant002, PPlant003: TPiranhaSprite;
+
     rKoopa: array [0..3] of array [0..20 * 24 - 1] of Byte;
 
-  const
-    FireBallList: array [0..3] of Pointer = (@F000, @F001, @F002, @F003);
-    KoopaList: array [Left..Right, kGreen..kRed, 0..1] of Pointer =
-      (((@GrKoopa000, @GrKoopa001), (@rdKoopa000, @rdKoopa001)),
-       ((@rKoopa [0], @rKoopa [1]), (@rKoopa [2], @rKoopa [3])));
+    FireBallList: array [0..3] of Pointer;
+    KoopaList: array [Left..Right, kGreen..kRed, 0..1] of Pointer;
 
-  {$I sprites\FIRE000.inc} {$I sprites\FIRE001.inc}
+  { Load a sprite file into a byte array }
+  procedure LoadEnemySpr(const SubPath: string; var Dest; DestSize: Integer);
+  var
+    Spr: TSpriteData;
+  begin
+    LoadSprite(SpritePath(SubPath), Spr);
+    if Length(Spr.Pixels) >= DestSize then
+      Move(Spr.Pixels[0], Dest, DestSize);
+  end;
+
+  procedure LoadEnemySprites;
+  begin
+    LoadEnemySpr('enemies/chibibo000.sprite', Chibibo000, SizeOf(Chibibo000));
+    LoadEnemySpr('enemies/chibibo001.sprite', Chibibo001, SizeOf(Chibibo001));
+    LoadEnemySpr('enemies/chibibo002.sprite', Chibibo002, SizeOf(Chibibo002));
+    LoadEnemySpr('enemies/chibibo003.sprite', Chibibo003, SizeOf(Chibibo003));
+    LoadEnemySpr('enemies/champ000.sprite', Champ000, SizeOf(Champ000));
+    LoadEnemySpr('enemies/poison000.sprite', Poison000, SizeOf(Poison000));
+    LoadEnemySpr('enemies/life000.sprite', Life000, SizeOf(Life000));
+    LoadEnemySpr('enemies/flower000.sprite', Flower000, SizeOf(Flower000));
+    LoadEnemySpr('enemies/star000.sprite', Star000, SizeOf(Star000));
+    LoadEnemySpr('enemies/fish001.sprite', Fish001, SizeOf(Fish001));
+    LoadEnemySpr('enemies/pplant000.sprite', PPlant000, SizeOf(PPlant000));
+    LoadEnemySpr('enemies/pplant001.sprite', PPlant001, SizeOf(PPlant001));
+    LoadEnemySpr('enemies/pplant002.sprite', PPlant002, SizeOf(PPlant002));
+    LoadEnemySpr('enemies/pplant003.sprite', PPlant003, SizeOf(PPlant003));
+    LoadEnemySpr('enemies/red000.sprite', Red000, SizeOf(Red000));
+    LoadEnemySpr('enemies/red001.sprite', Red001, SizeOf(Red001));
+    LoadEnemySpr('enemies/f000.sprite', F000, SizeOf(F000));
+    LoadEnemySpr('enemies/f001.sprite', F001, SizeOf(F001));
+    LoadEnemySpr('enemies/f002.sprite', F002, SizeOf(F002));
+    LoadEnemySpr('enemies/f003.sprite', F003, SizeOf(F003));
+    LoadEnemySpr('enemies/hit000.sprite', Hit000, SizeOf(Hit000));
+    LoadEnemySpr('enemies/grkoopa000.sprite', GrKoopa000, SizeOf(GrKoopa000));
+    LoadEnemySpr('enemies/grkoopa001.sprite', GrKoopa001, SizeOf(GrKoopa001));
+    LoadEnemySpr('enemies/rdkoopa000.sprite', RdKoopa000, SizeOf(RdKoopa000));
+    LoadEnemySpr('enemies/rdkoopa001.sprite', RdKoopa001, SizeOf(RdKoopa001));
+    LoadEnemySpr('enemies/grkp000.sprite', GrKp000, SizeOf(GrKp000));
+    LoadEnemySpr('enemies/grkp001.sprite', GrKp001, SizeOf(GrKp001));
+    LoadEnemySpr('enemies/rdkp000.sprite', RdKp000, SizeOf(RdKp000));
+    LoadEnemySpr('enemies/rdkp001.sprite', RdKp001, SizeOf(RdKp001));
+    LoadEnemySpr('tiles/lift1000.sprite', Lift1000, SizeOf(Lift1000));
+    LoadEnemySpr('tiles/donut000.sprite', Donut000, SizeOf(Donut000));
+    LoadEnemySpr('tiles/donut001.sprite', Donut001, SizeOf(Donut001));
+    LoadEnemySpr('enemies/fire000.sprite', Fire000, SizeOf(Fire000));
+    LoadEnemySpr('enemies/fire001.sprite', Fire001, SizeOf(Fire001));
+
+    { Initialize pointer arrays (was const, now var since sprites are loaded at runtime) }
+    FireBallList[0] := @F000;
+    FireBallList[1] := @F001;
+    FireBallList[2] := @F002;
+    FireBallList[3] := @F003;
+
+    KoopaList[Left, kGreen, 0] := @GrKoopa000;
+    KoopaList[Left, kGreen, 1] := @GrKoopa001;
+    KoopaList[Left, kRed, 0]   := @RdKoopa000;
+    KoopaList[Left, kRed, 1]   := @RdKoopa001;
+    KoopaList[Right, kGreen, 0] := @rKoopa[0];
+    KoopaList[Right, kGreen, 1] := @rKoopa[1];
+    KoopaList[Right, kRed, 0]   := @rKoopa[2];
+    KoopaList[Right, kRed, 1]   := @rKoopa[3];
+  end;
 
   const
     Grounded = 0;
