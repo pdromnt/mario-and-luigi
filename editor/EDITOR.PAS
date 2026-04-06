@@ -14,7 +14,7 @@ Program Editor;
 
 {$IFDEF WINDOWS}
   {$APPTYPE GUI}
-  {$R editor.res}
+  {$R resources\editor.res}
 {$ENDIF}
 
 {$IFDEF LINUX}

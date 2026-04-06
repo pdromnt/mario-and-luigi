@@ -140,9 +140,6 @@ implementation
     PageOffset: Word = 0;  { kept for GetPageOffset compatibility }
 
     YOffset: Integer = 0;
-    YStart: Integer = 0;
-    YEnd: Integer = SCREEN_HEIGHT;
-
   { Background save/restore stack }
   const
     MAX_BACKGR_STACK = 256;
@@ -184,8 +181,6 @@ implementation
   end;
 
   procedure InitVGA;
-  var
-    i: Integer;
   begin
     if InGraphicsMode then
       Exit;
@@ -238,8 +233,6 @@ implementation
     XView := 0;
     YView := 0;
     YOffset := 0;
-    YStart := 0;
-    YEnd := SCREEN_HEIGHT;
     QuitRequested := False;
     LastFrameTime := SDL_GetTicks;
 
@@ -416,12 +409,12 @@ implementation
 
   procedure SetYStart (NewYStart: Integer);
   begin
-    YStart := NewYStart;
+    { YStart no longer used in SDL2 port }
   end;
 
   procedure SetYEnd (NewYEnd: Integer);
   begin
-    YEnd := NewYEnd;
+    { YEnd no longer used in SDL2 port }
   end;
 
   procedure SetYOffset (NewYOffset: Integer);
@@ -952,9 +945,6 @@ implementation
   end;
 
   { ===== Unit Initialization ===== }
-
-var
-  i: Integer;
 
 begin
   QuitRequested := False;

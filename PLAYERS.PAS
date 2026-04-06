@@ -119,8 +119,6 @@ implementation
     keyDown,
     keyAlt,
     keyCtrl,
-    keyLeftShift,
-    keyRightShift,
     keySpace: Boolean;
 
   type
@@ -138,9 +136,6 @@ implementation
   var
     X,
     Y,
-    OldX,
-    OldY,
-    DemoX,
     DemoY,
     DemoCounter1,
     DemoCounter2,
@@ -228,8 +223,6 @@ implementation
     Player := Name;
     X := InitX;
     Y := InitY;
-    OldX := X;
-    OldY := Y;
     XVel := 0;
     YVel := 0;
     Direction := dirRight;
@@ -259,8 +252,6 @@ implementation
   end;
 
   procedure DrawDemo;
-  var
-    i, j: Integer;
   begin
     with SaveScreen [CurrentPage] do
     begin
@@ -293,8 +284,6 @@ implementation
 
 
     end;
-    OldX := X;
-    OldY := Y;
   end;
 
   procedure DrawPlayer;
@@ -331,8 +320,6 @@ implementation
         else
           DrawImage (X, Y, W, 2 * H, Pictures^ [Player, Data.Mode [Player], WalkingMode,
             Direction]);
-      OldX := X;
-      OldY := Y;
     end;
   end;
 
@@ -430,7 +417,6 @@ implementation
     Demo := dm;
     DemoCounter1 := 0;
     DemoCounter2 := 0;
-    DemoX := 0;
     DemoY := 0;
     Below1 := ' ';
     Below2 := ' ';

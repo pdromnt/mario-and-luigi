@@ -48,10 +48,10 @@ REM Compile icon resource (editor.res is also committed to the repo
 REM as a fallback in case windres is not available)
 set WINDRES=%FPC_DIR%\x86_64-win64-windres.exe
 if not exist "%WINDRES%" set WINDRES=%FPC_DIR%\windres.exe
-if exist icon.ico if exist editor.rc (
+if exist resources\icon.ico if exist resources\editor.rc (
     echo Compiling icon resource...
-    "%WINDRES%" --preprocessor=cat -i editor.rc -o editor.res 2>nul
-    if exist editor.res (
+    "%WINDRES%" --preprocessor=cat -i resources\editor.rc -o resources\editor.res 2>nul
+    if exist resources\editor.res (
         echo Icon resource OK.
     ) else (
         echo WARNING: windres not found, using pre-built editor.res if available.

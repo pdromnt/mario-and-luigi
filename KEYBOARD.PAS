@@ -103,7 +103,7 @@ interface
 implementation
 
   uses
-    sdl2;
+    sdl2, AssetPaths;
 
   const
     MaxKeys = 9;
@@ -138,11 +138,9 @@ implementation
     KeyMap: Array[1..MaxKeys] of Boolean =
       (False, False, False, False, False, False, False, False, False);
 
-    HandlerActive: Boolean = FALSE;
     KeyHit: Boolean = FALSE;
 
-  { Demo keys data - extracted from DEMOKEYS.OBJ }
-  {$I data\demokeys.inc}
+  { Default demo is loaded from assets/demos/default.rpl at runtime }
 
   function MapSDLKeyToScancode(sym: TSDL_Keycode): Byte;
     { Map SDL key code to PC AT scancode }
@@ -275,7 +273,6 @@ implementation
 
   procedure InitKeyBoard;
   begin
-    HandlerActive := TRUE;
     KeyHit := FALSE;
     Key := #0;
     FillChar(MacroHdr, SizeOf(MacroHdr), 0);
@@ -292,7 +289,6 @@ implementation
 
   procedure KeyBoardDone;
   begin
-    HandlerActive := FALSE;
   end;
 
   procedure ResetKeyBoard;
@@ -320,12 +316,21 @@ implementation
   end;
 
   procedure PlayMacro;
+  var
+    Hdr: DemoHeader;
   begin
-    Playing := TRUE;
-    Recording := FALSE;
-    FillChar(SeqPos, SizeOf(SeqPos), 0);
-    Move(DemoKeysData, Sequence, SizeOf(Sequence));
-    RandSeed := 0;
+    { Load the default demo from asset file }
+    if LoadMacroFromFile(AssetPaths.GetAssetsDir + 'demos' + DirectorySeparator + 'default.rpl', Hdr) then
+      { LoadMacroFromFile sets Playing, Sequence, RandSeed, MacroHdr }
+    else
+    begin
+      { Fallback: just start playback with empty sequence (will end immediately) }
+      Playing := TRUE;
+      Recording := FALSE;
+      FillChar(SeqPos, SizeOf(SeqPos), 0);
+      FillChar(Sequence, SizeOf(Sequence), 0);
+      RandSeed := 0;
+    end;
   end;
 
   procedure StopMacro;
@@ -383,7 +388,6 @@ implementation
   var
     F: File;
     ReadBytes: LongInt;
-    i: Integer;
   begin
     LoadMacroFromFile := FALSE;
     Assign(F, FileName);
@@ -393,12 +397,12 @@ implementation
     if (IOResult <> 0) or (ReadBytes <> SizeOf(DemoHeader)) then
     begin
       Close(F);
-      i := IOResult;
+      IOResult;
       Exit;
     end;
     BlockRead(F, Sequence, SizeOf(Sequence), ReadBytes);
     Close(F);
-    i := IOResult;
+    IOResult;
     if ReadBytes = SizeOf(Sequence) then
     begin
       Playing := TRUE;
@@ -413,22 +417,39 @@ implementation
   function NextDemoName: string;
   var
     F: File;
-    i, Dummy: Integer;
-    Name: string;
+    i, p: Integer;
+    Name, FullPath, SaveDir, S: string;
+    Len: Byte absolute S;
   begin
     NextDemoName := '';
+    { Get savedata directory — same logic as MARIO.PAS GetUserDataDir }
+    S := ParamStr(0);
+    p := Len;
+    while (p > 0) and (S[p] <> '\') and (S[p] <> '/') do Dec(p);
+    if p > 0 then
+      SaveDir := Copy(S, 1, p)
+    else
+      SaveDir := '';
+    SaveDir := SaveDir + 'savedata' + DirectorySeparator;
+    {$I-}
+    MkDir(SaveDir);
+    if IOResult <> 0 then ;
+    {$I+}
     for i := 1 to 9 do
     begin
       Name := 'REPLAY' + Chr(i + Ord('0')) + '.RPL';
-      Assign(F, Name);
+      FullPath := SaveDir + Name;
+      Assign(F, FullPath);
+      {$I-}
       Reset(F, 1);
       if IOResult <> 0 then
       begin
-        NextDemoName := Name;
+        NextDemoName := FullPath;
         Exit;
       end;
       Close(F);
-      Dummy := IOResult;
+      if IOResult <> 0 then ;
+      {$I+}
     end;
   end;
 

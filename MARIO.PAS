@@ -6,7 +6,7 @@ program Mario;
   {$A+} {$B-} {$G+} {$I-} {$R-} {$S+} {$V-} {$X+}
   {$IFDEF WINDOWS}
   {$APPTYPE GUI}
-  {$R mario.res}
+  {$R resources\mario.res}
   {$ENDIF}
 
   {$DEFINE MENU}
@@ -192,23 +192,6 @@ program Mario;
     Joystick.BindJSStatus := Settings.JSBtnStatus;
   end;
 
-  procedure DebugLog(const Msg: string);
-  var
-    F: Text;
-    Dummy: Integer;
-  begin
-    Assign(F, 'debug.log');
-    Append(F);
-    if IOResult <> 0 then
-    begin
-      ReWrite(F);
-      if IOResult <> 0 then Exit;  { Can't open log at all }
-    end;
-    WriteLn(F, Msg);
-    Close(F);
-    Dummy := IOResult;  { Always consume IOResult so it never leaks }
-  end;
-
   function GetKeyNameStr(kc: LongInt): string;
   { Convert SDL keycode to uppercase display name, max 12 chars }
   var
@@ -249,7 +232,6 @@ program Mario;
     var
       Home: string;
       D: string;
-      Dummy: Integer;
   begin
     Home := GetEnv('HOME');
     if Home = '' then
@@ -257,10 +239,13 @@ program Mario;
       GetUserDataDir := '';
       Exit;
     end;
-    D := Home + '/.mario-luigi/';
-    { Create directory if it doesn't exist }
+    D := Home + '/.mario-luigi/savedata/';
+    {$I-}
+    MkDir(Home + '/.mario-luigi');
+    if IOResult <> 0 then ;
     MkDir(D);
-    Dummy := IOResult;  { ignore error if already exists }
+    if IOResult <> 0 then ;
+    {$I+}
     GetUserDataDir := D;
   end;
   {$ELSE}
@@ -268,6 +253,7 @@ program Mario;
       S: string;
       Len: byte absolute S;
       i: Integer;
+      D: string;
   begin
     S := ParamStr(0);
     { Strip filename, keep directory path }
@@ -275,9 +261,14 @@ program Mario;
     while (i > 0) and (S[i] <> '\') and (S[i] <> '/') do
       Dec(i);
     if i > 0 then
-      GetUserDataDir := Copy(S, 1, i)
+      D := Copy(S, 1, i) + 'savedata' + DirectorySeparator
     else
-      GetUserDataDir := '';
+      D := 'savedata' + DirectorySeparator;
+    {$I-}
+    MkDir(D);
+    if IOResult <> 0 then ;
+    {$I+}
+    GetUserDataDir := D;
   end;
   {$ENDIF}
 
@@ -294,6 +285,24 @@ program Mario;
   function GetHiScoreName: string;
   begin
     GetHiScoreName := GetUserDataDir + 'MARIO.HIS';
+  end;
+
+  procedure DebugLog(const Msg: string);
+  var
+    F: Text;
+  begin
+    Assign(F, GetUserDataDir + 'debug.log');
+    {$I-}
+    Append(F);
+    if IOResult <> 0 then
+    begin
+      ReWrite(F);
+      if IOResult <> 0 then Exit;
+    end;
+    WriteLn(F, Msg);
+    Close(F);
+    if IOResult <> 0 then ;
+    {$I+}
   end;
 
   procedure ReadConfig;
@@ -411,7 +420,6 @@ program Mario;
     var
       FC: SettingsFile;
       FS: SaveFile;
-      Dummy: Integer;
   begin
     with Settings do
     begin
@@ -437,7 +445,7 @@ program Mario;
     Settings.JSBtnStatus := Joystick.BindJSStatus;
   {$IFDEF MENU}
     { Consume any stale IOResult before file operations }
-    Dummy := IOResult;
+    IOResult;
 
     { Write settings (MARIO.CFG) }
     Assign (FC, GetConfigName);
@@ -446,11 +454,11 @@ program Mario;
     begin
       Write (FC, Settings);
       Close (FC);
-      Dummy := IOResult;
+      IOResult;
     end;
 
     { Consume any stale IOResult before next file }
-    Dummy := IOResult;
+    IOResult;
 
     { Write save games (MARIO.SAV) }
     Assign (FS, GetSaveName);
@@ -459,7 +467,7 @@ program Mario;
     begin
       Write (FS, Saves);
       Close (FS);
-      Dummy := IOResult;
+      IOResult;
     end;
   {$ENDIF}
   end;
@@ -489,16 +497,15 @@ program Mario;
   var
     UF: File;
     ReadBytes: LongInt;
-    Dummy: Integer;
   begin
-    Dummy := IOResult;
+    IOResult;
     Assign(UF, GetHiScoreName);
     Reset(UF, 1);
     if IOResult = 0 then
     begin
       BlockRead(UF, HiScores, SizeOf(HiScoreTable), ReadBytes);
       Close(UF);
-      Dummy := IOResult;
+      IOResult;
       if ReadBytes = SizeOf(HiScoreTable) then
         Exit;
     end;
@@ -508,16 +515,15 @@ program Mario;
   procedure WriteHiScores;
   var
     UF: File;
-    Dummy: Integer;
   begin
-    Dummy := IOResult;
+    IOResult;
     Assign(UF, GetHiScoreName);
     ReWrite(UF, 1);
     if IOResult = 0 then
     begin
       BlockWrite(UF, HiScores, SizeOf(HiScoreTable));
       Close(UF);
-      Dummy := IOResult;
+      IOResult;
     end;
   end;
 
@@ -763,7 +769,7 @@ program Mario;
 
   procedure ReadCmdLine;
     var
-      i, j: Integer;
+      i: Integer;
       S: String;
   begin
     TestPlayMode := FALSE;
@@ -796,34 +802,64 @@ program Mario;
     end;
   end;
 
+  procedure CleanupOldFiles;
+  { Remove legacy files from old locations (before savedata/ was introduced) }
+  var
+    F: File;
+    ExeDir: string;
+    S: string;
+    Len: Byte absolute S;
+    p: Integer;
+
+    procedure TryDelete(const Path: string);
+    begin
+      Assign(F, Path);
+      {$I-}
+      Erase(F);
+      if IOResult <> 0 then ;
+      {$I+}
+    end;
+
+  var
+    i: Integer;
+  begin
+    S := ParamStr(0);
+    p := Len;
+    while (p > 0) and (S[p] <> '\') and (S[p] <> '/') do Dec(p);
+    if p > 0 then
+      ExeDir := Copy(S, 1, p)
+    else
+      ExeDir := '';
+    TryDelete(ExeDir + 'MARIO.CFG');
+    TryDelete(ExeDir + 'MARIO.SAV');
+    TryDelete(ExeDir + 'MARIO.HIS');
+    TryDelete(ExeDir + 'MARIO.DEM');
+    TryDelete(ExeDir + 'debug.log');
+    for i := 1 to 9 do
+      TryDelete(ExeDir + 'REPLAY' + Chr(i + Ord('0')) + '.RPL');
+  end;
+
   procedure Demo;
   var
     Hdr: DemoHeader;
+    DemoPath: string;
+    DemoLoaded: Boolean;
   begin
-    { Try loading MARIO.DEM first; fall back to built-in DemoKeysData }
+    { Try MARIO.DEM (user override), then default.rpl (shipped asset) }
     FillChar(Hdr, SizeOf(Hdr), 0);
-    if LoadMacroFromFile('MARIO.DEM', Hdr) then
+    DemoLoaded := LoadMacroFromFile(GetUserDataDir + 'MARIO.DEM', Hdr);
+    if not DemoLoaded then
+    begin
+      DemoPath := GetAssetsDir + 'demos' + DirectorySeparator + 'default.rpl';
+      DemoLoaded := LoadMacroFromFile(DemoPath, Hdr);
+    end;
+    if DemoLoaded then
     begin
       NewData;
       Turbo := FALSE;
       Data.Progress[plMario] := Hdr.Level;
-      case Hdr.Level of
-        0: PlayWorldByIndex(' ', ' ', 0, plMario);
-        1: PlayWorldByIndex(' ', ' ', 1, plMario);
-        2: PlayWorldByIndex(' ', ' ', 2, plMario);
-        3: PlayWorldByIndex(' ', ' ', 3, plMario);
-        4: PlayWorldByIndex(' ', ' ', 4, plMario);
-        5: PlayWorldByIndex(' ', ' ', 5, plMario);
-      end;
-    end
-    else
-    begin
-      { Built-in demo: level 6a (Progress=5) }
-      NewData;
-      Turbo := FALSE;
-      Data.Progress[plMario] := 5;
-      PlayMacro;
-      PlayWorldByIndex(' ', ' ', 5, plMario);
+      if Hdr.Level < NUM_LEV then
+        PlayWorldByIndex(' ', ' ', Hdr.Level, plMario);
     end;
     StopMacro;
   end;
@@ -834,7 +870,7 @@ program Mario;
   begin
     FillChar(Hdr, SizeOf(Hdr), 0);
     Hdr.Level := Level;
-    if not LoadMacroFromFile(FileName, Hdr) then Exit;
+    if not LoadMacroFromFile(GetUserDataDir + FileName, Hdr) then Exit;
     NewData;
     Turbo := FALSE;
     Data.Progress[plMario] := Hdr.Level;
@@ -913,7 +949,7 @@ program Mario;
     procedure ScanDemos;
     var
       F: File;
-      si, Dummy: Integer;
+      si: Integer;
       Hdr: DemoHeader;
       ReadBytes: LongInt;
       Name: string[12];
@@ -922,13 +958,13 @@ program Mario;
       for si := 1 to 9 do
       begin
         Name := 'REPLAY' + Chr(si + Ord('0')) + '.RPL';
-        Assign(F, Name);
+        Assign(F, GetUserDataDir + Name);
         Reset(F, 1);
         if IOResult = 0 then
         begin
           BlockRead(F, Hdr, SizeOf(DemoHeader), ReadBytes);
           Close(F);
-          Dummy := IOResult;
+          if IOResult <> 0 then ;
           if ReadBytes = SizeOf(DemoHeader) then
           begin
             Inc(NumDemos);
@@ -1446,7 +1482,7 @@ program Mario;
                   else if (Selected >= 1) and (Selected <= NumDemos) then
                   begin
                     { Delete the selected replay file }
-                    Assign(DelF, DemoFiles[Selected]);
+                    Assign(DelF, GetUserDataDir + DemoFiles[Selected]);
                     Erase(DelF);
                     i := IOResult;  { Consume IOResult }
                     { Refresh: re-enter ST_DEMOS_DEL to rescan }
@@ -1688,7 +1724,7 @@ program Mario;
   var
     OldExitProc: Pointer;
 
-  procedure CleanupOnExit; far;
+  procedure CleanupOnExit;
   begin
     ExitProc := OldExitProc;  { Restore previous exit proc }
     WriteConfig;
@@ -1710,6 +1746,9 @@ begin  { Mario }
   ReadConfig;
   ReadHiScores;
   ReadCmdLine;
+
+  { Clean up old files from pre-savedata locations }
+  CleanupOldFiles;
 
   jr := Settings.JSDat;
   jsEnabled := jsDetected and Settings.UseJS;

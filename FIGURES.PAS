@@ -706,8 +706,7 @@ implementation
     Y2 = Y1 + 96;
     YStep = (Y2 - Y1) div 16;  { = 6 }
   var
-    i, j, k: Integer;
-    Mix: Word;
+    i, j: Integer;
   begin
     if Options.BackGrType = 0 then
       Fill (X, Y, W, H, $E0)
@@ -1070,9 +1069,7 @@ implementation
     AB,
     CD,
     EF,
-    LastAB,
-    LastCD,
-    LastEF: Char;
+    LastAB: Char;
 
   procedure BuildWall (X, Y: Integer);
   const
@@ -1169,8 +1166,7 @@ implementation
         end;
 
     LastAB := ' ';
-    LastCD := ' ';
-    LastEF := ' ';
+    EF := #0;
 
     with Options do
       BuildWall := (WallType1 < 100);
@@ -1184,7 +1180,7 @@ implementation
 
         LastAB := AB;
         LastAB := CD;   { Note: matches original bug - should be LastCD }
-        LastAB := EF;   { Note: matches original bug - should be LastEF }
+        LastAB := EF;   { Note: matches original bug - should be LastEF  }
       end;
     end
     else

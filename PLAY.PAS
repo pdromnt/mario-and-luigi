@@ -44,8 +44,7 @@ implementation
     procedure MoveScreen;
       var
         Scroll: Integer;
-        N1, N2: Integer;
-        i, j, OldX, NewX, Page: Integer;
+        i, j, Page: Integer;
 
     begin
       Page := CurrentPage;

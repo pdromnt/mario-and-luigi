@@ -23,13 +23,13 @@ set OUTPUT=-FEOUT
 
 REM Compile icon resource (mario.res is also committed to the repo
 REM as a fallback in case windres is not available)
-if exist icon.ico if exist mario.rc (
+if exist resources\icon.ico if exist resources\mario.rc (
     echo Compiling icon resource...
-    "%WINDRES%" --preprocessor=cat -i mario.rc -o mario.res 2>nul
-    if exist mario.res (
+    "%WINDRES%" --preprocessor=cat -i resources\mario.rc -o resources\mario.res 2>nul
+    if exist resources\mario.res (
         echo Icon resource OK.
     ) else (
-        echo WARNING: windres not found, using pre-built mario.res if available.
+        echo WARNING: windres not found, using pre-built resources\mario.res if available.
     )
 )
 

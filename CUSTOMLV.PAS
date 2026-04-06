@@ -249,8 +249,8 @@ begin
   DecodeTileRowFromBuf := Pos;
 end;
 
-{ Find the end of a JSON object starting at Pos (should point to '{').
-  Returns position after the closing '}', or Len if not found. }
+{ Find the end of a JSON object starting at Pos (should point to opening brace).
+  Returns position after the closing brace, or Len if not found. }
 function FindObjEnd(Buf: PCharBuf; Pos, Len: LongInt): LongInt;
 var
   Depth: Integer;

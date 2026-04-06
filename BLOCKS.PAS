@@ -28,7 +28,6 @@ implementation
     OldBumpX,
     OldBumpY,
     DY,
-    YPos,
     DelayCounter: Integer;
 
 

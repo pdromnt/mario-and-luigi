@@ -936,10 +936,9 @@ implementation
 
   procedure MoveEnemies;
   var
-    i, j, Page, NewX,
-    OldXVel, OldYVel: Integer;
+    i, j, NewX,
+    OldXVel: Integer;
   begin
-    Page := CurrentPage;
     Inc (TimeCounter);
     for i := 1 to NumEnemies do
     begin
