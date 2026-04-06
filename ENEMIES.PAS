@@ -104,8 +104,10 @@ implementation
 
   type
     TStdSprite = array[0..279] of Byte;       { 20x14 }
+    TSmallSprite = array[0..83] of Byte;      { 12x7 }
     TKoopaSprite = array[0..479] of Byte;     { 20x24 }
     TPiranhaSprite = array[0..479] of Byte;   { 24x20 }
+    THitSprite = array[0..479] of Byte;       { 24x20, same as piranha }
 
   var
     { Standard 20x14 enemies }
@@ -114,11 +116,11 @@ implementation
     Fish001: TStdSprite;
     Red000, Red001: TStdSprite;
     F000, F001, F002, F003: TStdSprite;
-    Hit000: TStdSprite;
+    Hit000: THitSprite;  { 24x20 explosion sprite }
     GrKp000, GrKp001, RdKp000, RdKp001: TStdSprite;
     Lift1000: TStdSprite;
     Donut000, Donut001: TStdSprite;
-    Fire000, Fire001: TStdSprite;
+    Fire000, Fire001: TSmallSprite;  { 12x7 player fireball sprites }
 
     { 20x24 Koopa sprites }
     GrKoopa000, GrKoopa001: TKoopaSprite;
@@ -603,11 +605,9 @@ implementation
               MoveDelay := 0;
               YVel := 0;
               inc (Status);
-              if Status < 12 then
-                DrawImage (XPos, YPos, 24, 20, Hit000)
-              else
-                if Status > 14 then
-                  Tp := tpDying;
+              if Status > 14 then
+                Tp := tpDying;
+              { No visible death sprite — plant just disappears into the pipe }
             end;
           tpRed:
             DrawImage (XPos, YPos, W, H,

@@ -789,6 +789,7 @@ implementation
     FadeUp (64);
     Palettes.ReadPalette (Palette);
 
+    Key := #0;  { Clear any stale keypresses from FadeUp/init so demos don't exit immediately }
     WasPlayingMacro := PlayingMacro;
     TextStatus := Stat and (not WasPlayingMacro);
     if not DemoRecording then

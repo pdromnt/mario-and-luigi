@@ -394,7 +394,7 @@ implementation
       Recording := FALSE;
       FillChar(SeqPos, SizeOf(SeqPos), 0);
       RandSeed := Hdr.Seed;
-      MacroHdr := Hdr;     { Store for PlayWorld to read on init }
+      MacroHdr := Hdr;
       LoadMacroFromFile := TRUE;
     end;
   end;
