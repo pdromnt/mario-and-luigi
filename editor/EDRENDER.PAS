@@ -240,10 +240,16 @@ function EdLoadLevelFromFile(const FileName: AnsiString): Boolean;
 
 { --- Save/Load (JSON format) --- }
 
-{ Save current level to a JSON file. Returns True on success. }
+{ Save current level to a JSON file. Returns True on success.
+  v2 format: multi-sublevel (editor native format) }
 function EdSaveLevelJSON(const FileName: AnsiString): Boolean;
 
+{ Save current active sub-level to a single-level v3 JSON file.
+  Compatible with game's manifest system. }
+function EdSaveLevelV3(const FileName: AnsiString): Boolean;
+
 { Load a level from a JSON file. Returns True on success.
+  Supports v1, v2 (editor), and v3 (single-level) formats.
   Re-initializes rendering (sky, walls, pipes, background, palette). }
 function EdLoadLevelJSON(const FileName: AnsiString): Boolean;
 
@@ -280,11 +286,22 @@ implementation
 
 uses
   SysUtils,
-  VGA256, Figures, BackGr, Worlds, Palettes, Enemies;
+  VGA256, Figures, BackGr, Worlds, Palettes, Enemies,
+  SpriteLoader, AssetPaths, LevelFormat;
 
-{ Small Mario standing sprite — included directly to avoid pulling in Players unit.
-  Sprite faces left; we flip it horizontally when building the texture. }
-{$I ..\sprites\SWMAR000.inc}
+var
+  { Small Mario standing sprite — loaded from file to avoid pulling in Players unit.
+    Sprite faces left; we flip it horizontally when building the texture. }
+  SWMar000: array[0..559] of Byte;  { 20x28 }
+
+procedure LoadEdMarioSprite;
+var
+  Spr: TSpriteData;
+begin
+  LoadSprite(SpritePath('players/swmar000.sprite'), Spr);
+  if Length(Spr.Pixels) >= SizeOf(SWMar000) then
+    Move(Spr.Pixels[0], SWMar000, SizeOf(SWMar000));
+end;
 
 { --- Sub-Level Buffer Data --- }
 
@@ -607,7 +624,17 @@ begin
     GL_RGBA, GL_UNSIGNED_BYTE, nil);
   glBindTexture(GL_TEXTURE_2D, 0);
 
-  { Initialize game world subsystems }
+  { Load all sprite and data assets from files }
+  LoadFiguresSprites;
+  LoadEnemySprites;
+
+  { Load Mario sprite for player position marker }
+  LoadEdMarioSprite;
+
+  { Load background data (palettes + terrain profiles) }
+  LoadBackGrData;
+
+  { Initialize game world subsystems (loads manifest + all levels from JSON) }
   InitWorlds;
 
   { Save pristine copies of sprites that get modified in-place
@@ -2420,6 +2447,44 @@ begin
   Result := True;
 end;
 
+function EdSaveLevelV3(const FileName: AnsiString): Boolean;
+var
+  Lvl: TLevelData;
+  Col, Row: Integer;
+  XSz: Integer;
+begin
+  Result := False;
+  if not LevelLoaded then Exit;
+  EdSaveActiveToBuffer;
+
+  { Build TLevelData from active sub-level }
+  if SubLevels[ActiveSubLevel] = nil then Exit;
+
+  Lvl.Name := SubLevels[ActiveSubLevel]^.SLMetaName;
+  Lvl.Creator := SubLevels[ActiveSubLevel]^.SLMetaCreator;
+  Lvl.Description := SubLevels[ActiveSubLevel]^.SLMetaDescription;
+  Lvl.MusicTrack := SubLevels[ActiveSubLevel]^.SLMusicTrack;
+  Lvl.Options := SubLevels[ActiveSubLevel]^.Opts;
+  XSz := Lvl.Options.XSize;
+  if XSz < 1 then XSz := 1;
+  if XSz > MaxWorldSize then XSz := MaxWorldSize;
+  Lvl.Width := XSz;
+
+  { Convert WorldBuffer back to MapBuffer (reverse of MapToWorldBuffer) }
+  FillChar(Lvl.Map, SizeOf(Lvl.Map), ' ');
+  for Col := 0 to XSz - 1 do
+    for Row := 1 to NV do
+      Lvl.Map[Col + 1, Row] := SubLevels[ActiveSubLevel]^.WorldSnap[Col, NV - Row];
+
+  { Set end terminator }
+  if XSz < MaxWorldSize then
+    Lvl.Map[XSz + 1, 1] := #0;
+
+  FillChar(Lvl.HiddenRow, SizeOf(Lvl.HiddenRow), ' ');
+
+  Result := LevelFormat.SaveLevelJSON(FileName, Lvl);
+end;
+
 { ===== JSON Load ===== }
 
 { Helper: skip whitespace in buffer }
@@ -2603,6 +2668,69 @@ end;
 { Forward declaration for v2 JSON loader }
 function LoadJSONv2(const Buf: AnsiString): Boolean; forward;
 
+{ Load a v3 single-level JSON file using shared LevelFormat unit }
+function EdLoadLevelV3(const FileName: AnsiString): Boolean;
+var
+  Lvl: TLevelData;
+begin
+  Result := False;
+  if not Initialized then Exit;
+  if not LevelFormat.LoadLevelJSON(FileName, Lvl) then Exit;
+
+  { Free existing sub-level buffers }
+  FreeAllSubLevels;
+  RestoreSpriteBackups;
+
+  { Set up game state from loaded data }
+  Options := Lvl.Options;
+  FillChar(WorldMap^, SizeOf(WorldBuffer), ' ');
+  MapToWorldBuffer(Lvl.Map, WorldMap, Options);
+
+  { Create single sub-level }
+  AllocSubLevel(0);
+  Move(WorldMap^, SubLevels[0]^.WorldSnap, SizeOf(WorldBuffer));
+  SubLevels[0]^.Opts := Options;
+  SubLevels[0]^.TabName := 'Level A';
+  SubLevels[0]^.SLMetaName := Lvl.Name;
+  SubLevels[0]^.SLMetaCreator := Lvl.Creator;
+  SubLevels[0]^.SLMetaDescription := Lvl.Description;
+  SubLevels[0]^.SLMusicTrack := Lvl.MusicTrack;
+  NumSubLevels := 1;
+  ActiveSubLevel := 0;
+
+  { Set metadata }
+  MetaName := Lvl.Name;
+  MetaCreator := Lvl.Creator;
+  MetaDescription := Lvl.Description;
+
+  { Initialize rendering state from loaded options }
+  with Options do
+  begin
+    InitSky(SkyType);
+    InitWalls(WallType1, WallType2, WallType3);
+    InitPipes(PipeColor);
+    InitBackGr(BackGrType, Clouds);
+  end;
+  BuildWorld;
+  NewPalette(P256^);
+  SetSkyPalette;
+  InitGrass;
+  DrawPalBackGr;
+  InitWaterfallPalette;
+  InitDecoSpritePalette;
+  ReadPalette(Palette);
+
+  LevelLoaded := True;
+
+  { Build tile atlas for the loaded level's theme }
+  EdBuildTileAtlas;
+  EdBuildEnemyAtlas;
+  EdBuildSkyPreview;
+  EdBuildPlayerSprite;
+
+  Result := True;
+end;
+
 function EdLoadLevelJSON(const FileName: AnsiString): Boolean;
 var
   F: File;
@@ -2634,8 +2762,12 @@ begin
   CloseFile(F);
   if BytesRead <> FileSize then Exit;
 
-  { Validate format }
-  if Pos('"mario-luigi-level"', Buf) = 0 then Exit;
+  { Check for v3 format (single level, uses LevelFormat shared unit) }
+  if Pos('"mario-luigi-level"', Buf) = 0 then
+  begin
+    Result := EdLoadLevelV3(FileName);
+    Exit;
+  end;
 
   { Free existing sub-level buffers }
   FreeAllSubLevels;

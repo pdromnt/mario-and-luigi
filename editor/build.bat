@@ -29,7 +29,7 @@ REM Unit search paths:
 REM   OUT first so fresh editor PPU/O files take priority over stale game builds in ..\OUT
 REM   ImGui-Pascal src, impl, OpenGL3, SDL2 bindings
 REM   Parent dir (..) for game units: VGA256, Buffers, Figures, BackGr, Worlds, Palettes, etc.
-set UNIT_PATH=-FuOUT -Fu%IMGUI%\src -Fu%IMGUI%\impl -Fu%IMGUI%\OpenGL3 -Fu%IMGUI%\SDL2-for-Pascal\units -Fu..
+set UNIT_PATH=-FuOUT -Fu%IMGUI%\src -Fu%IMGUI%\impl -Fu%IMGUI%\OpenGL3 -Fu%IMGUI%\SDL2-for-Pascal\units -Fu.. -Fu..\shared
 set INC_PATH=-Fi%IMGUI%\src -Fi%IMGUI%\SDL2-for-Pascal\units -Fi..
 
 REM Library search path (for dynamic linking)
@@ -78,6 +78,12 @@ del /Q OUT\*.o OUT\*.or OUT\*.obj OUT\*.a OUT\*.ppu OUT\*.rst OUT\*.res 2>nul
 REM Copy required DLLs
 copy /Y "%IMGUI%\libs\dynamic\windows\64bit\cimgui.dll" OUT\ >nul 2>&1
 copy /Y "%IMGUI%\libs\dynamic\windows\64bit\SDL2.dll" OUT\ >nul 2>&1
+
+REM Copy assets folder
+if exist "..\assets" (
+    echo Copying assets...
+    robocopy "..\assets" "OUT\assets" /E /NFL /NDL /NJH /NJS /NP >nul 2>&1
+)
 
 echo Build complete! Output is in the OUT\ folder.
 echo Run OUT\EDITOR.exe to launch the editor!
