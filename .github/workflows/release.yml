@@ -94,17 +94,17 @@ jobs:
           <plist version="1.0">
           <dict>
             <key>CFBundleExecutable</key>
-            <string>mario</string>
+            <string>game</string>
             <key>CFBundleName</key>
             <string>Mario and Luigi</string>
             <key>CFBundleIdentifier</key>
-            <string>com.mariosrc.mario-and-luigi</string>
+            <string>com.pdromnt.mario-and-luigi</string>
             <key>CFBundleVersion</key>
             <string>${VERSION}</string>
             <key>CFBundleShortVersionString</key>
             <string>${VERSION}</string>
             <key>CFBundleIconFile</key>
-            <string>mario</string>
+            <string>game</string>
             <key>CFBundlePackageType</key>
             <string>APPL</string>
             <key>NSHighResolutionCapable</key>
@@ -118,13 +118,13 @@ jobs:
             ICONDIR=$(mktemp -d)
             sips -s format png icon.ico --out "$ICONDIR/icon_512x512.png" 2>/dev/null || true
             if [ -f "$ICONDIR/icon_512x512.png" ]; then
-              mkdir -p "$ICONDIR/mario.iconset"
+              mkdir -p "$ICONDIR/game.iconset"
               # Generate required sizes
               for SIZE in 16 32 64 128 256 512; do
                 sips -z $SIZE $SIZE "$ICONDIR/icon_512x512.png" \
-                  --out "$ICONDIR/mario.iconset/icon_${SIZE}x${SIZE}.png" 2>/dev/null || true
+                  --out "$ICONDIR/game.iconset/icon_${SIZE}x${SIZE}.png" 2>/dev/null || true
               done
-              iconutil -c icns "$ICONDIR/mario.iconset" -o "$APP/Contents/Resources/mario.icns" 2>/dev/null || true
+              iconutil -c icns "$ICONDIR/game.iconset" -o "$APP/Contents/Resources/game.icns" 2>/dev/null || true
             fi
             rm -rf "$ICONDIR"
           fi
@@ -158,7 +158,7 @@ jobs:
           ls -1 "$FWDIR/"
 
           # ── Rebase all dylib paths ──
-          BINARY="$APP/Contents/MacOS/mario"
+          BINARY="$APP/Contents/MacOS/game"
 
           # Helper: rewrite every Homebrew reference in a Mach-O file
           rebase_deps() {
@@ -211,7 +211,7 @@ jobs:
       - name: Package
         run: |
           mkdir -p staging
-          cp game staging/
+          cp game staging/mario
           if ls music/*.ogg 1>/dev/null 2>&1; then
             mkdir -p staging/music
             cp music/*.ogg staging/music/
@@ -258,7 +258,7 @@ jobs:
       - name: Package
         run: |
           mkdir -p staging
-          cp game staging/
+          cp game staging/mario
           if ls music/*.ogg 1>/dev/null 2>&1; then
             mkdir -p staging/music
             cp music/*.ogg staging/music/
