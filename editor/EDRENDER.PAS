@@ -3063,7 +3063,7 @@ end;
 
 function LoadJSONv2(const Buf: AnsiString): Boolean;
 var
-  P, ArrStart, ObjStart, ObjEnd: Integer;
+  P, ObjStart, ObjEnd: Integer;
   SLIdx: Integer;
   TabName, SLName, SLCreator, SLDesc: AnsiString;
 begin
@@ -3076,7 +3076,6 @@ begin
   if P = 0 then Exit;
   P := SkipWS(Buf, P);
   if (P > Length(Buf)) or (Buf[P] <> '[') then Exit;
-  ArrStart := P;
   Inc(P);
 
   SLIdx := 0;

@@ -81,7 +81,6 @@ var
   ShowMarkers: Boolean = True;  { Show enemy/item/player start markers }
   IsDragging: Boolean = False; { True while middle-click dragging viewport }
   DragLastX: Integer = -1;    { Last mouse X during drag (SDL screen coords) }
-  DragLastY: Integer = -1;    { Last mouse Y during drag }
   DragCurX: Integer = 0;      { Current mouse X (temp) }
   DragCurY: Integer = 0;      { Current mouse Y (temp) }
   DragDeltaX: Integer = 0;    { Delta X per frame (temp) }
@@ -950,9 +949,6 @@ var
   PipeBgR1, PipeBgR2: ImVec2;
   PipeLabelLen: Integer;
   { Pipe warp connections }
-  PipeInfoTX: array[0..63] of Integer;
-  PipeInfoTY: array[0..63] of Integer;
-  PipeInfoAction: array[0..63] of Char;
   PipeInfoMatch: array[0..63] of Char;
   PipeInfoCX: array[0..63] of Single;
   PipeInfoCY: array[0..63] of Single;
@@ -1667,7 +1663,7 @@ begin
         NeedRerender := True;
       end;
       DragLastX := DragCurX;
-      DragLastY := DragCurY;
+
     end;
 
     { Tile size in screen pixels }
@@ -2294,9 +2290,6 @@ begin
           if MarkerCh <> '0' then Continue;
           PipeAbove := EdGetTileAt(tx, ty - 1);
           if not (PipeAbove in [#$E0..#$EF]) then Continue;
-          PipeInfoTX[PipeCount] := tx;
-          PipeInfoTY[PipeCount] := ty;
-          PipeInfoAction[PipeCount] := PipeAbove;
           { Match code is to the right of the action code }
           PipeInfoMatch[PipeCount] := EdGetTileAt(tx + 1, ty - 1);
           { Screen center }
@@ -2917,14 +2910,12 @@ begin
       begin
         IsDragging := True;
         DragLastX := Event.button.x;
-        DragLastY := Event.button.y;
       end;
       if (Event.type_ = SDL_MOUSEBUTTONUP) and
          (Event.button.button = SDL_BUTTON_MIDDLE) then
       begin
         IsDragging := False;
         DragLastX := -1;
-        DragLastY := -1;
       end;
 
       { Keyboard shortcuts }
