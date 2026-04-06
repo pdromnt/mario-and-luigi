@@ -286,7 +286,7 @@ implementation
 
 uses
   SysUtils,
-  VGA256, Figures, BackGr, Worlds, Palettes, Enemies,
+  VGA256, Figures, BackGr, Worlds, Palettes, Enemies, TileDefs,
   SpriteLoader, AssetPaths, LevelFormat;
 
 var

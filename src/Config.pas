@@ -195,9 +195,8 @@ implementation
     { Zero the settings record BEFORE reading to prevent stale data }
     FillChar(Settings, SizeOf(Settings), 0);
 
-  {$IFDEF MENU}
     { Consume any stale IOResult }
-    i := IOResult;
+    IOResult;
 
     { Read settings (MARIO.CFG) using untyped file for backward compat }
     Assign (UF, GetConfigName);
@@ -213,11 +212,11 @@ implementation
         SettingsOK := (IOResult = 0) and (ReadBytes = FileBytes);
       end;
       Close (UF);
-      i := IOResult;
+      IOResult;
     end;
 
     { Consume any stale IOResult before next file }
-    i := IOResult;
+    IOResult;
 
     { Read save games (MARIO.SAV) }
     Assign (FS, GetSaveName);
@@ -233,10 +232,9 @@ implementation
       else
       begin
         Close (FS);
-        i := IOResult;
+        IOResult;
       end;
     end;
-  {$ENDIF}
 
     if not SettingsOK then
     begin
@@ -319,7 +317,6 @@ implementation
     Settings.JSBtnPause  := Joystick.BindJSPause;
     Settings.JSBtnSound  := Joystick.BindJSSound;
     Settings.JSBtnStatus := Joystick.BindJSStatus;
-  {$IFDEF MENU}
     { Consume any stale IOResult before file operations }
     IOResult;
 
@@ -345,7 +342,6 @@ implementation
       Close (FS);
       IOResult;
     end;
-  {$ENDIF}
   end;
 
   procedure CalibrateJoystick;
