@@ -31,6 +31,12 @@ type
   WorldBuffer = array[-EX..MaxWorldSize - 1 + EX, -EY1..NV - 1 + EY2] of Char;
   WorldBufferPtr = ^WorldBuffer;
 
+  { Turbo override: key-value pair for turbo-mode theme changes }
+  TTurboOverride = record
+    Key: string;
+    Value: Integer;
+  end;
+
   { A single level's data (one sub-level) }
   TLevelData = record
     Name: string;
@@ -38,15 +44,10 @@ type
     Description: string;
     MusicTrack: string;
     Options: WorldOptions;
+    TurboOverrides: array of TTurboOverride;
     Width: Integer;
     Map: MapBuffer;
     HiddenRow: array[1..MaxWorldSize] of Char;
-  end;
-
-  { Manifest: world ordering for the game }
-  TTurboOverride = record
-    Key: string;
-    Value: Integer;
   end;
 
   TWorldManifestEntry = record
@@ -407,6 +408,9 @@ procedure ParseSublevelRegion(Buf: PCharBuf; ObjStart, ObjEnd: LongInt;
 var
   XSz, Row: Integer;
   P, OptStart, OptEnd: LongInt;
+  TurboEnd: LongInt;
+  TKey: string;
+  TVal: Integer;
 begin
   Level.Name := GetStrInRange(Buf, 'name', ObjStart, ObjEnd, '');
   if Level.Name = '' then
@@ -455,6 +459,36 @@ begin
         P := DecodeTileRowFromBuf(Buf, P, ObjEnd, Level.Map, Row, XSz);
         P := SkipWS(Buf, P, ObjEnd);
         if (P < ObjEnd) and (Buf^[P] = ',') then Inc(P);
+      end;
+    end;
+  end;
+
+  { Parse turboOptions if present }
+  SetLength(Level.TurboOverrides, 0);
+  P := FindKeyInRange(Buf, 'turboOptions', ObjStart, ObjEnd);
+  if P >= 0 then
+  begin
+    P := SkipWS(Buf, P, ObjEnd);
+    if (P < ObjEnd) and (Buf^[P] = '{') then
+    begin
+      TurboEnd := FindObjEnd(Buf, P, ObjEnd);
+      P := P + 1;
+      while P < TurboEnd - 1 do
+      begin
+        P := SkipWS(Buf, P, TurboEnd);
+        if (P >= TurboEnd) or (Buf^[P] <> '"') then Break;
+        ReadStrFromBuf(Buf, P, TurboEnd, TKey);
+        P := P + Length(TKey) + 2;
+        P := SkipWS(Buf, P, TurboEnd);
+        if (P < TurboEnd) and (Buf^[P] = ':') then Inc(P);
+        ReadIntFromBuf(Buf, P, TurboEnd, TVal);
+        P := SkipWS(Buf, P, TurboEnd);
+        while (P < TurboEnd) and (Buf^[P] in ['0'..'9', '-']) do Inc(P);
+        if (P < TurboEnd) and (Buf^[P] = ',') then Inc(P);
+
+        SetLength(Level.TurboOverrides, Length(Level.TurboOverrides) + 1);
+        Level.TurboOverrides[High(Level.TurboOverrides)].Key := TKey;
+        Level.TurboOverrides[High(Level.TurboOverrides)].Value := TVal;
       end;
     end;
   end;
@@ -590,7 +624,22 @@ begin
       SL.Add(RowStr);
     end;
 
-    SL.Add('  ]');
+    if Length(Level.TurboOverrides) > 0 then
+    begin
+      SL.Add('  ],');
+      SL.Add('  "turboOptions": {');
+      for Row := 0 to High(Level.TurboOverrides) do
+      begin
+        RowStr := '    "' + Level.TurboOverrides[Row].Key + '": '
+          + IntToStr(Level.TurboOverrides[Row].Value);
+        if Row < High(Level.TurboOverrides) then
+          RowStr := RowStr + ',';
+        SL.Add(RowStr);
+      end;
+      SL.Add('  }');
+    end
+    else
+      SL.Add('  ]');
     SL.Add('}');
 
     ForceDirectories(ExtractFileDir(FilePath));

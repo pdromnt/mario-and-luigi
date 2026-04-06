@@ -282,6 +282,14 @@ procedure EdSetSubLevelName(Index: Integer; const S: AnsiString);
   all sub-level buffers to be up-to-date. }
 procedure EdSaveActiveToBuffer;
 
+{ --- Turbo Override Access --- }
+
+function EdGetTurboOverrideCount: Integer;
+function EdGetTurboOverrideKey(Index: Integer): AnsiString;
+function EdGetTurboOverrideValue(Index: Integer): Integer;
+procedure EdSetTurboOverride(const Key: AnsiString; Value: Integer);
+procedure EdRemoveTurboOverride(const Key: AnsiString);
+
 implementation
 
 uses
@@ -314,6 +322,7 @@ type
     SLMetaCreator: AnsiString;
     SLMetaDescription: AnsiString;
     SLMusicTrack: AnsiString;   { Music track filename (e.g. "level1.ogg"), empty = default }
+    TurboOverrides: array of TTurboOverride;
   end;
   PSubLevelData = ^TSubLevelData;
 
@@ -1241,6 +1250,72 @@ begin
   EdBuildEnemyAtlas;
   EdBuildPlayerSprite;
   EdBuildSkyPreview;
+end;
+
+{ --- Turbo Override Access --- }
+
+function EdGetTurboOverrideCount: Integer;
+begin
+  if (ActiveSubLevel < 0) or (ActiveSubLevel >= NumSubLevels) then begin Result := 0; Exit; end;
+  if SubLevels[ActiveSubLevel] = nil then begin Result := 0; Exit; end;
+  Result := Length(SubLevels[ActiveSubLevel]^.TurboOverrides);
+end;
+
+function EdGetTurboOverrideKey(Index: Integer): AnsiString;
+begin
+  Result := '';
+  if (ActiveSubLevel < 0) or (ActiveSubLevel >= NumSubLevels) then Exit;
+  if SubLevels[ActiveSubLevel] = nil then Exit;
+  if (Index < 0) or (Index >= Length(SubLevels[ActiveSubLevel]^.TurboOverrides)) then Exit;
+  Result := SubLevels[ActiveSubLevel]^.TurboOverrides[Index].Key;
+end;
+
+function EdGetTurboOverrideValue(Index: Integer): Integer;
+begin
+  Result := 0;
+  if (ActiveSubLevel < 0) or (ActiveSubLevel >= NumSubLevels) then Exit;
+  if SubLevels[ActiveSubLevel] = nil then Exit;
+  if (Index < 0) or (Index >= Length(SubLevels[ActiveSubLevel]^.TurboOverrides)) then Exit;
+  Result := SubLevels[ActiveSubLevel]^.TurboOverrides[Index].Value;
+end;
+
+procedure EdSetTurboOverride(const Key: AnsiString; Value: Integer);
+var
+  I, N: Integer;
+begin
+  if (ActiveSubLevel < 0) or (ActiveSubLevel >= NumSubLevels) then Exit;
+  if SubLevels[ActiveSubLevel] = nil then Exit;
+  { Update existing key if found }
+  N := Length(SubLevels[ActiveSubLevel]^.TurboOverrides);
+  for I := 0 to N - 1 do
+    if SubLevels[ActiveSubLevel]^.TurboOverrides[I].Key = Key then
+    begin
+      SubLevels[ActiveSubLevel]^.TurboOverrides[I].Value := Value;
+      Exit;
+    end;
+  { Append new override }
+  SetLength(SubLevels[ActiveSubLevel]^.TurboOverrides, N + 1);
+  SubLevels[ActiveSubLevel]^.TurboOverrides[N].Key := Key;
+  SubLevels[ActiveSubLevel]^.TurboOverrides[N].Value := Value;
+end;
+
+procedure EdRemoveTurboOverride(const Key: AnsiString);
+var
+  I, J, N: Integer;
+begin
+  if (ActiveSubLevel < 0) or (ActiveSubLevel >= NumSubLevels) then Exit;
+  if SubLevels[ActiveSubLevel] = nil then Exit;
+  N := Length(SubLevels[ActiveSubLevel]^.TurboOverrides);
+  for I := 0 to N - 1 do
+    if SubLevels[ActiveSubLevel]^.TurboOverrides[I].Key = Key then
+    begin
+      { Shift remaining items down }
+      for J := I to N - 2 do
+        SubLevels[ActiveSubLevel]^.TurboOverrides[J] :=
+          SubLevels[ActiveSubLevel]^.TurboOverrides[J + 1];
+      SetLength(SubLevels[ActiveSubLevel]^.TurboOverrides, N - 1);
+      Exit;
+    end;
 end;
 
 function EdGetNumSubLevels: Integer;
@@ -2482,6 +2557,11 @@ begin
 
   FillChar(Lvl.HiddenRow, SizeOf(Lvl.HiddenRow), ' ');
 
+  { Copy turbo overrides from sub-level buffer }
+  SetLength(Lvl.TurboOverrides, Length(SubLevels[ActiveSubLevel]^.TurboOverrides));
+  for Col := 0 to Length(SubLevels[ActiveSubLevel]^.TurboOverrides) - 1 do
+    Lvl.TurboOverrides[Col] := SubLevels[ActiveSubLevel]^.TurboOverrides[Col];
+
   Result := LevelFormat.SaveLevelJSON(FileName, Lvl);
 end;
 
@@ -2672,6 +2752,7 @@ function LoadJSONv2(const Buf: AnsiString): Boolean; forward;
 function EdLoadLevelV3(const FileName: AnsiString): Boolean;
 var
   Lvl: TLevelData;
+  I: Integer;
 begin
   Result := False;
   if not Initialized then Exit;
@@ -2695,6 +2776,9 @@ begin
   SubLevels[0]^.SLMetaCreator := Lvl.Creator;
   SubLevels[0]^.SLMetaDescription := Lvl.Description;
   SubLevels[0]^.SLMusicTrack := Lvl.MusicTrack;
+  SetLength(SubLevels[0]^.TurboOverrides, Length(Lvl.TurboOverrides));
+  for I := 0 to Length(Lvl.TurboOverrides) - 1 do
+    SubLevels[0]^.TurboOverrides[I] := Lvl.TurboOverrides[I];
   NumSubLevels := 1;
   ActiveSubLevel := 0;
 

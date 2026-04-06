@@ -870,6 +870,31 @@ begin
   end;
 end;
 
+{ Turbo override helpers }
+function FindTurboKey(const Key: AnsiString): Integer;
+var
+  I: Integer;
+begin
+  Result := -1;
+  for I := 0 to EdGetTurboOverrideCount - 1 do
+    if EdGetTurboOverrideKey(I) = Key then
+    begin
+      Result := I;
+      Exit;
+    end;
+end;
+
+function GetTurboValue(const Key: AnsiString): CInt;
+var
+  Idx: Integer;
+begin
+  Idx := FindTurboKey(Key);
+  if Idx >= 0 then
+    Result := EdGetTurboOverrideValue(Idx)
+  else
+    Result := 0;
+end;
+
 { Draw all ImGui content }
 procedure DrawGUI;
 var
@@ -987,6 +1012,9 @@ var
   CurMusic: AnsiString;
   MusicPreview: AnsiString;
   MusicChanged: Boolean;
+  { Turbo overrides }
+  TurboActive: Boolean;
+  TurboVal: CInt;
 begin
   { Start ImGui frame }
   ImGui_OpenGL3_NewFrame();
@@ -2524,6 +2552,189 @@ begin
     ImGuiInputTextFlags_None, nil, nil) then
     EditorDirty := True;
   ImGui.PopItemWidth();
+  ImGui.Separator();
+  if ImGui.CollapsingHeader('Turbo Overrides', ImGuiTreeNodeFlags_None) then
+  begin
+    ImGui.PushItemWidth(100);
+    { Helper: find turbo override index by key, -1 if not found }
+    { -- skyType -- }
+    TurboActive := (FindTurboKey('skyType') >= 0);
+    if ImGui.Checkbox('##turbo_skyType', @TurboActive) then
+    begin
+      if TurboActive then
+        EdSetTurboOverride('skyType', EdGetSkyType)
+      else
+        EdRemoveTurboOverride('skyType');
+      EditorDirty := True;
+    end;
+    ImGui.SameLine(0, 4);
+    if TurboActive then
+    begin
+      TurboVal := GetTurboValue('skyType');
+      if ImGui.SliderInt('Sky Type##turbo', @TurboVal, 0, 12, '%d') then
+      begin
+        EdSetTurboOverride('skyType', TurboVal);
+        EditorDirty := True;
+      end;
+    end
+    else
+      ImGui.TextDisabled('Sky Type');
+    { -- wallType1 -- }
+    TurboActive := (FindTurboKey('wallType1') >= 0);
+    if ImGui.Checkbox('##turbo_wallType1', @TurboActive) then
+    begin
+      if TurboActive then
+        EdSetTurboOverride('wallType1', 0)
+      else
+        EdRemoveTurboOverride('wallType1');
+      EditorDirty := True;
+    end;
+    ImGui.SameLine(0, 4);
+    if TurboActive then
+    begin
+      TurboVal := GetTurboValue('wallType1');
+      if ImGui.SliderInt('Wall Type##turbo', @TurboVal, 0, 6, '%d') then
+      begin
+        EdSetTurboOverride('wallType1', TurboVal);
+        EditorDirty := True;
+      end;
+    end
+    else
+      ImGui.TextDisabled('Wall Type');
+    { -- backgrType -- }
+    TurboActive := (FindTurboKey('backgrType') >= 0);
+    if ImGui.Checkbox('##turbo_backgrType', @TurboActive) then
+    begin
+      if TurboActive then
+        EdSetTurboOverride('backgrType', EdGetBackGrType)
+      else
+        EdRemoveTurboOverride('backgrType');
+      EditorDirty := True;
+    end;
+    ImGui.SameLine(0, 4);
+    if TurboActive then
+    begin
+      TurboVal := GetTurboValue('backgrType');
+      if ImGui.SliderInt('BG Type##turbo', @TurboVal, 0, 7, '%d') then
+      begin
+        EdSetTurboOverride('backgrType', TurboVal);
+        EditorDirty := True;
+      end;
+    end
+    else
+      ImGui.TextDisabled('BG Type');
+    { -- backgrColor1 -- }
+    TurboActive := (FindTurboKey('backgrColor1') >= 0);
+    if ImGui.Checkbox('##turbo_backgrColor1', @TurboActive) then
+    begin
+      if TurboActive then
+        EdSetTurboOverride('backgrColor1', 0)
+      else
+        EdRemoveTurboOverride('backgrColor1');
+      EditorDirty := True;
+    end;
+    ImGui.SameLine(0, 4);
+    if TurboActive then
+    begin
+      TurboVal := GetTurboValue('backgrColor1');
+      if ImGui.SliderInt('BG Color 1##turbo', @TurboVal, 0, 255, '%d') then
+      begin
+        EdSetTurboOverride('backgrColor1', TurboVal);
+        EditorDirty := True;
+      end;
+    end
+    else
+      ImGui.TextDisabled('BG Color 1');
+    { -- backgrColor2 -- }
+    TurboActive := (FindTurboKey('backgrColor2') >= 0);
+    if ImGui.Checkbox('##turbo_backgrColor2', @TurboActive) then
+    begin
+      if TurboActive then
+        EdSetTurboOverride('backgrColor2', 0)
+      else
+        EdRemoveTurboOverride('backgrColor2');
+      EditorDirty := True;
+    end;
+    ImGui.SameLine(0, 4);
+    if TurboActive then
+    begin
+      TurboVal := GetTurboValue('backgrColor2');
+      if ImGui.SliderInt('BG Color 2##turbo', @TurboVal, 0, 255, '%d') then
+      begin
+        EdSetTurboOverride('backgrColor2', TurboVal);
+        EditorDirty := True;
+      end;
+    end
+    else
+      ImGui.TextDisabled('BG Color 2');
+    { -- pipeColor -- }
+    TurboActive := (FindTurboKey('pipeColor') >= 0);
+    if ImGui.Checkbox('##turbo_pipeColor', @TurboActive) then
+    begin
+      if TurboActive then
+        EdSetTurboOverride('pipeColor', 0)
+      else
+        EdRemoveTurboOverride('pipeColor');
+      EditorDirty := True;
+    end;
+    ImGui.SameLine(0, 4);
+    if TurboActive then
+    begin
+      TurboVal := GetTurboValue('pipeColor');
+      if ImGui.SliderInt('Pipe Color##turbo', @TurboVal, 0, 255, '%d') then
+      begin
+        EdSetTurboOverride('pipeColor', TurboVal);
+        EditorDirty := True;
+      end;
+    end
+    else
+      ImGui.TextDisabled('Pipe Color');
+    { -- groundColor1 -- }
+    TurboActive := (FindTurboKey('groundColor1') >= 0);
+    if ImGui.Checkbox('##turbo_groundColor1', @TurboActive) then
+    begin
+      if TurboActive then
+        EdSetTurboOverride('groundColor1', 0)
+      else
+        EdRemoveTurboOverride('groundColor1');
+      EditorDirty := True;
+    end;
+    ImGui.SameLine(0, 4);
+    if TurboActive then
+    begin
+      TurboVal := GetTurboValue('groundColor1');
+      if ImGui.SliderInt('Ground Color 1##turbo', @TurboVal, 0, 255, '%d') then
+      begin
+        EdSetTurboOverride('groundColor1', TurboVal);
+        EditorDirty := True;
+      end;
+    end
+    else
+      ImGui.TextDisabled('Ground Color 1');
+    { -- groundColor2 -- }
+    TurboActive := (FindTurboKey('groundColor2') >= 0);
+    if ImGui.Checkbox('##turbo_groundColor2', @TurboActive) then
+    begin
+      if TurboActive then
+        EdSetTurboOverride('groundColor2', 0)
+      else
+        EdRemoveTurboOverride('groundColor2');
+      EditorDirty := True;
+    end;
+    ImGui.SameLine(0, 4);
+    if TurboActive then
+    begin
+      TurboVal := GetTurboValue('groundColor2');
+      if ImGui.SliderInt('Ground Color 2##turbo', @TurboVal, 0, 255, '%d') then
+      begin
+        EdSetTurboOverride('groundColor2', TurboVal);
+        EditorDirty := True;
+      end;
+    end
+    else
+      ImGui.TextDisabled('Ground Color 2');
+    ImGui.PopItemWidth();
+  end;
   ImGui.Separator();
   ImGui.Text(AnsiString('Scroll: ' + IntToStr(ScrollX) + ' / ' + IntToStr(LevelW) + ' px'));
   ImGui.Text(AnsiString('Zoom: ' + IntToStr(ZoomLevel) + 'x'));
