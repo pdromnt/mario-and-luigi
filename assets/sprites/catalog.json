@@ -1,0 +1,85 @@
+{
+  "tiles": {
+    "63":  { "file": "tiles/quest000.sprite", "name": "question_block" },
+    "64":  { "file": "tiles/quest001.sprite", "name": "question_block_alt" },
+    "73":  { "file": "tiles/block000.sprite", "name": "solid_block" },
+    "74":  { "file": "tiles/block001.sprite", "name": "breakable_block" },
+    "75":  { "file": "tiles/note000.sprite", "name": "note_block" },
+    "88":  { "file": "tiles/xblock000.sprite", "name": "xblock" },
+    "87":  { "file": "tiles/wood000.sprite", "name": "wood" },
+    "42":  { "file": "tiles/coin000.sprite", "name": "coin" },
+    "61":  { "file": "tiles/pin000.sprite", "name": "pin" },
+    "48":  { "file": "tiles/pipe000.sprite", "name": "pipe_0" },
+    "49":  { "file": "tiles/pipe001.sprite", "name": "pipe_1" },
+    "50":  { "file": "tiles/pipe002.sprite", "name": "pipe_2" },
+    "51":  { "file": "tiles/pipe003.sprite", "name": "pipe_3" },
+    "70":  { "file": "decorations/fence000.sprite", "name": "fence" },
+    "102": { "file": "decorations/fence001.sprite", "name": "fence_alt" },
+    "83":  { "file": "decorations/smtree000.sprite", "name": "small_tree_top" },
+    "115": { "file": "decorations/smtree001.sprite", "name": "small_tree_bottom" },
+    "80":  { "file": "decorations/wpalm000.sprite", "name": "white_palm_trunk" },
+    "97":  { "file": "decorations/fall000.sprite", "name": "waterfall_top" },
+    "98":  { "file": "decorations/fall001.sprite", "name": "waterfall_bottom" },
+    "84":  { "file": "decorations/tree000.sprite", "name": "tree_bottom" },
+    "116": { "file": "decorations/tree001.sprite", "name": "tree_trunk" },
+    "76":  { "file": "decorations/lava000.sprite", "name": "lava_safe" },
+    "108": { "file": "decorations/lava001.sprite", "name": "lava_bottom" },
+    "119": { "file": "decorations/window000.sprite", "name": "window_left" },
+    "118": { "file": "decorations/window001.sprite", "name": "window_right" },
+    "112": { "file": "decorations/palm0000.sprite", "name": "palm_center" },
+    "113": { "file": "decorations/palm1000.sprite", "name": "palm_leaf_left" },
+    "114": { "file": "decorations/palm2000.sprite", "name": "palm_leaf_top" },
+    "117": { "file": "decorations/palm3000.sprite", "name": "palm_leaf_right" },
+    "254": { "file": "tiles/exit000.sprite", "name": "exit_top" },
+    "255": { "file": "tiles/exit001.sprite", "name": "exit_bottom" }
+  },
+  "enemies": {
+    "128": { "file": "enemies/chibibo000.sprite", "w": 20, "h": 14, "name": "goomba" },
+    "131": { "file": "enemies/chibibo002.sprite", "w": 20, "h": 14, "name": "red_goomba" },
+    "129": { "file": "enemies/fish001.sprite", "w": 20, "h": 14, "name": "fish" },
+    "130": { "file": "enemies/f000.sprite", "w": 20, "h": 14, "name": "fireball" },
+    "132": { "file": "enemies/pplant002.sprite", "w": 24, "h": 20, "name": "green_piranha" },
+    "133": { "file": "enemies/pplant002.sprite", "w": 24, "h": 20, "name": "green_piranha_alt" },
+    "134": { "file": "enemies/pplant000.sprite", "w": 24, "h": 20, "name": "red_piranha" },
+    "135": { "file": "enemies/red000.sprite", "w": 20, "h": 14, "name": "spiny" },
+    "136": { "file": "enemies/grkoopa000.sprite", "w": 20, "h": 24, "name": "green_koopa" },
+    "137": { "file": "enemies/rdkoopa000.sprite", "w": 20, "h": 24, "name": "red_koopa" },
+    "138": { "file": "enemies/grkoopa000.sprite", "w": 20, "h": 24, "name": "fast_green_koopa" },
+    "176": { "file": "tiles/lift1000.sprite", "w": 20, "h": 14, "name": "block_lift" },
+    "177": { "file": "tiles/donut000.sprite", "w": 20, "h": 14, "name": "falling_platform" }
+  },
+  "walls": {
+    "green":  { "files": ["walls/green000.sprite","walls/green001.sprite","walls/green002.sprite","walls/green003.sprite","walls/green004.sprite"] },
+    "ground": { "files": ["walls/ground000.sprite","walls/ground001.sprite","walls/ground002.sprite","walls/ground003.sprite","walls/ground004.sprite"] },
+    "sand":   { "files": ["walls/sand000.sprite","walls/sand001.sprite","walls/sand002.sprite","walls/sand003.sprite","walls/sand004.sprite"] },
+    "brown":  { "files": ["walls/brown000.sprite","walls/brown001.sprite","walls/brown002.sprite","walls/brown003.sprite","walls/brown004.sprite"] },
+    "grass":  { "files": ["walls/grass000.sprite","walls/grass001.sprite","walls/grass002.sprite","walls/grass003.sprite","walls/grass004.sprite"] },
+    "desert": { "files": ["walls/des000.sprite","walls/des001.sprite","walls/des002.sprite","walls/des003.sprite","walls/des004.sprite"] }
+  },
+  "bricks": {
+    "pattern0": ["tiles/brick0000.sprite","tiles/brick0001.sprite","tiles/brick0002.sprite"],
+    "pattern1": ["tiles/brick1000.sprite","tiles/brick1001.sprite","tiles/brick1002.sprite"],
+    "pattern2": ["tiles/brick2000.sprite","tiles/brick2001.sprite","tiles/brick2002.sprite"]
+  },
+  "colorVariants": {
+    "pipeColors":   [24, 48, 80, 112, 128, 176],
+    "brickColors":  [24, 48, 72, 176],
+    "xblockColors": [48, 104, 160, 176],
+    "woodColors":   [24, 48, 72],
+    "wallCodeBases": {
+      "green": 91, "sand": 100, "brown": 109, "grass": 118, "desert": 139
+    },
+    "pipeBase": 178,
+    "brickBase": 202,
+    "xblockBase": 206,
+    "woodBase": 210,
+    "breakBase": 213
+  },
+  "grassOverlays": {
+    "variants": [
+      ["walls/grass1000.sprite","walls/grass2000.sprite","walls/grass3000.sprite"],
+      ["walls/grass1001.sprite","walls/grass2001.sprite","walls/grass3001.sprite"],
+      ["walls/grass1002.sprite","walls/grass2002.sprite","walls/grass3002.sprite"]
+    ]
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "intro": "intro.json",
+  "worlds": [
+    {
+      "name": "World 1",
+      "levelA": "world1a.json",
+      "levelB": "world1b.json",
+      "turboOptions": { "skyType": 5, "backgrType": 3 }
+    },
+    {
+      "name": "World 2",
+      "levelA": "world2a.json",
+      "levelB": "world2b.json",
+      "turboOptions": { "skyType": 6, "backgrType": 6, "backgrColor1": 101, "backgrColor2": 26 }
+    },
+    {
+      "name": "World 3",
+      "levelA": "world3a.json",
+      "levelB": "world3b.json",
+      "turboOptions": { "skyType": 12 }
+    },
+    {
+      "name": "World 4",
+      "levelA": "world4a.json",
+      "levelB": "world4b.json",
+      "turboOptions": { "skyType": 9, "wallType1": 6, "backgrType": 1 }
+    },
+    {
+      "name": "World 5",
+      "levelA": "world5a.json",
+      "levelB": "world5b.json",
+      "turboOptions": { "skyType": 3 }
+    },
+    {
+      "name": "World 6",
+      "levelA": "world6a.json",
+      "levelB": "world6b.json",
+      "turboOptions": { "pipeColor": 48, "groundColor1": 73, "backgrColor1": 52, "backgrColor2": 76 }
+    }
+  ]
+}
